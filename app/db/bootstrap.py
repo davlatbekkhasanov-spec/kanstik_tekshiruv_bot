@@ -13,6 +13,7 @@ from app.db.url import (
     async_connect_variants,
     database_url_candidates,
     db_host,
+    sync_connect_args,
     sync_connect_variants,
     to_sync_env_url,
 )
@@ -71,6 +72,23 @@ async def setup_database() -> tuple[str, dict]:
     raise RuntimeError(f"Barcha DB urinishlari muvaffaqiyatsiz: {last_err}")
 
 
+def ensure_schema(url: str) -> None:
+    """Jadvallar yo'q bo'lsa yaratadi (alembic muvaffaqiyatsiz bo'lsa)."""
+    from sqlalchemy import inspect
+
+    from app.db.base import Base
+
+    sync = alembic_sync_url(url)
+    connect_args = _sync_connect_args or sync_connect_args(url)
+    engine = create_engine(sync, connect_args=connect_args)
+    try:
+        if not inspect(engine).has_table("users"):
+            log.warning("users jadvali yo'q — create_all")
+            Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+
 def run_migrations(url: str) -> None:
     from alembic import command
     from alembic.config import Config
@@ -93,4 +111,5 @@ def run_migrations(url: str) -> None:
         except Exception as exc:
             last_err = exc
             log.warning("Migration try failed args=%s: %s", connect_args, exc)
-    raise RuntimeError(f"Migration failed: {last_err}")
+    log.error("Alembic failed, trying create_all: %s", last_err)
+    ensure_schema(url)

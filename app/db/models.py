@@ -8,6 +8,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.constants import ErrorType, InspectionResult, InspectionStatus, UserRole
 from app.db.base import Base
 
+user_role_enum = Enum(UserRole, name="user_role", create_type=False)
+inspection_status_enum = Enum(InspectionStatus, name="inspection_status", create_type=False)
+inspection_result_enum = Enum(InspectionResult, name="inspection_result", create_type=False)
+error_type_enum = Enum(ErrorType, name="error_type", create_type=False)
+
 
 class User(Base):
     __tablename__ = "users"
@@ -15,7 +20,7 @@ class User(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(255))
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.picker, index=True)
+    role: Mapped[UserRole] = mapped_column(user_role_enum, default=UserRole.picker, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), onupdate=func.now())
@@ -35,9 +40,9 @@ class Inspection(Base):
     picker_name: Mapped[str] = mapped_column(String(255))
     cargo_photo_file_id: Mapped[str] = mapped_column(String(255))
     status: Mapped[InspectionStatus] = mapped_column(
-        Enum(InspectionStatus), default=InspectionStatus.pending, index=True
+        inspection_status_enum, default=InspectionStatus.pending, index=True
     )
-    result: Mapped[InspectionResult | None] = mapped_column(Enum(InspectionResult), nullable=True)
+    result: Mapped[InspectionResult | None] = mapped_column(inspection_result_enum, nullable=True)
     reviewer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=True)
     reviewer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     review_group_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -58,7 +63,7 @@ class InspectionError(Base):
     inspection_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("inspections.id", ondelete="CASCADE"), unique=True, index=True
     )
-    error_type: Mapped[ErrorType] = mapped_column(Enum(ErrorType), index=True)
+    error_type: Mapped[ErrorType] = mapped_column(error_type_enum, index=True)
     error_comment: Mapped[str] = mapped_column(Text)
     error_photo_file_id: Mapped[str] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

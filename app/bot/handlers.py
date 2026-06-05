@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 
 from aiogram import Bot, F, Router
@@ -29,14 +30,28 @@ def _is_admin(uid: int) -> bool:
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    st = _settings()
-    if SessionLocal is None:
-        await message.answer(
-            "⚠️ Bot bazasi hali tayyor emas.\n"
-            "Railway Deploy Logs ni tekshiring yoki 1 daqiqadan keyin qayta /start yuboring."
-        )
-        return
+    welcome = (
+        "Kanstik tekshiruv botiga xush kelibsiz.\n\n"
+        "Teruvchi sifatida yukni tekshiruvga yuborish uchun tugmani bosing."
+    )
     try:
+        st = _settings()
+        extra = ""
+        if ntf.uses_private_notify(st):
+            extra = (
+                "\n\n🧪 <b>Test rejim</b> — tekshiruv xabarlari hozircha "
+                "<b>admin lichkasiga</b> ketadi (guruh emas).\n"
+                "Guruh tayyor bo‘lgach: <code>SETUP_MODE=0</code>"
+            )
+
+        if SessionLocal is None:
+            await message.answer(
+                welcome + extra + "\n\n⚠️ Bazaga ulanish kutilmoqda. 1 daqiqadan keyin qayta /start.",
+                reply_markup=picker_menu_kb(),
+                parse_mode="HTML",
+            )
+            return
+
         async with require_session_local()() as session:
             await svc.get_or_create_user(
                 session,
@@ -44,33 +59,19 @@ async def cmd_start(message: Message) -> None:
                 full_name=message.from_user.full_name or "",
                 admin_ids=st.admin_id_set(),
             )
-    except Exception as exc:
-        log.exception("DB error on /start user=%s", message.from_user.id)
-        hint = str(exc).split("\n", maxsplit=1)[0][:120]
-        if _is_admin(message.from_user.id):
-            await message.answer(
-                f"⚠️ DB xato (admin):\n<code>{hint}</code>\n\n"
-                "Railway: Postgres → bot servisiga <b>Reference</b> "
-                "<code>DATABASE_URL</code> ulang va Redeploy.",
-                parse_mode="HTML",
-            )
-        else:
-            await message.answer("⚠️ Vaqtinchalik xato. Admin bilan bog‘laning.")
-        return
-    extra = ""
-    if ntf.uses_private_notify(st):
-        extra = (
-            "\n\n🧪 <b>Test rejim</b> — tekshiruv xabarlari hozircha "
-            "<b>admin lichkasiga</b> ketadi (guruh emas).\n"
-            "Guruh tayyor bo‘lgach: <code>SETUP_MODE=0</code>"
+
+        await message.answer(
+            welcome + extra,
+            reply_markup=picker_menu_kb(),
+            parse_mode="HTML",
         )
-    await message.answer(
-        "Kanstik tekshiruv botiga xush kelibsiz.\n\n"
-        "Teruvchi sifatida yukni tekshiruvga yuborish uchun tugmani bosing."
-        + extra,
-        reply_markup=picker_menu_kb(),
-        parse_mode="HTML",
-    )
+    except Exception as exc:
+        log.exception("cmd_start failed user=%s", message.from_user.id)
+        err = html.escape(str(exc).split("\n", maxsplit=1)[0][:200])
+        await message.answer(
+            f"{welcome}\n\n⚠️ DB: {err}",
+            reply_markup=picker_menu_kb(),
+        )
 
 
 @router.message(F.text == "📦 Tekshiruvga yuborish")
