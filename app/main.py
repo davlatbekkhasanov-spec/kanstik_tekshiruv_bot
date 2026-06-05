@@ -6,11 +6,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import ErrorEvent
-
-from app.bot.handlers import router
-from app.config import get_settings
-from app.db.session import SessionLocal
 from sqlalchemy import text
+
+from app.config import get_settings
+from app.db.migrate import upgrade_head
+from app.db.session import SessionLocal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +21,16 @@ log = logging.getLogger(__name__)
 
 async def main() -> None:
     settings = get_settings()
+    if not settings.database_url:
+        log.error("DATABASE_URL / PGHOST topilmadi — Railway Postgres ulanganini tekshiring")
+    else:
+        try:
+            upgrade_head()
+        except Exception as exc:
+            log.error("Migration failed: %s", exc)
+
+    from app.bot.handlers import router
+
     bot = Bot(
         settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import ssl
+from urllib.parse import quote_plus
 
 
 def normalize_database_url(url: str) -> str:
@@ -11,6 +13,25 @@ def normalize_database_url(url: str) -> str:
     elif u.startswith("postgresql://") and "+asyncpg" not in u and "+psycopg2" not in u:
         u = "postgresql+asyncpg://" + u[len("postgresql://") :]
     return u
+
+
+def resolve_database_url() -> str:
+    """DATABASE_URL yoki Railway PG* o'zgaruvchilardan URL."""
+    host = os.getenv("PGHOST", "").strip()
+    if host:
+        port = (os.getenv("PGPORT", "5432") or "5432").strip()
+        user = (os.getenv("PGUSER", "postgres") or "postgres").strip()
+        password = os.getenv("PGPASSWORD", "")
+        db = (os.getenv("PGDATABASE", "railway") or "railway").strip()
+        return normalize_database_url(
+            f"postgresql://{quote_plus(user)}:{quote_plus(password)}@"
+            f"{host}:{port}/{quote_plus(db, safe='')}"
+        )
+    for key in ("DATABASE_URL", "DATABASE_PRIVATE_URL", "POSTGRES_URL"):
+        val = os.getenv(key, "").strip()
+        if val:
+            return normalize_database_url(val)
+    return ""
 
 
 def is_local_db(url: str) -> bool:
