@@ -20,7 +20,8 @@ python -m app.main
    - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}` (qo'lda copy emas!)
 3. Env: `BOT_TOKEN`, `ADMIN_IDS`, `SETUP_MODE=1` (test — lichka)
 4. Guruh tayyor bo‘lgach: `REVIEW_GROUP_ID`, `RETURN_GROUP_ID`, `SETUP_MODE=0`
-5. Deploy — `Procfile`: `alembic upgrade head` + `worker: python -m app.main`
+5. Deploy — migration **faqat bot ishga tushganda** (build vaqtida emas)
+6. Railway **Build Command** bo'sh bo'lsin (agar `alembic upgrade head` qo'yilgan bo'lsa — o'chiring)
 
 ## Buyruqlar
 
