@@ -84,6 +84,25 @@ async def get_inspection(session: AsyncSession, inspection_id: int) -> Inspectio
     )
 
 
+async def picker_telegram_id(session: AsyncSession, inspection: Inspection) -> int | None:
+    picker = await session.get(User, inspection.picker_id)
+    return picker.telegram_id if picker else None
+
+
+async def can_start_review(
+    session: AsyncSession,
+    inspection: Inspection,
+    *,
+    actor_telegram_id: int,
+    admin_ids: set[int],
+) -> tuple[bool, str]:
+    """Teruvchi o'z yukini tekshira olmaydi (admin test rejimida mumkin)."""
+    picker_tg = await picker_telegram_id(session, inspection)
+    if picker_tg and picker_tg == actor_telegram_id and actor_telegram_id not in admin_ids:
+        return False, "Teruvchi o'z yukini tekshira olmaydi. Tekshiruvchi kuting."
+    return True, ""
+
+
 async def start_review(
     session: AsyncSession,
     inspection: Inspection,
@@ -136,10 +155,12 @@ async def return_inspection(
 
 def new_inspection_text(insp: Inspection) -> str:
     return (
-        "📦 <b>YANGI TEKSHIRUV</b>\n\n"
+        "📦 <b>YANGI TEKSHIRUV</b>\n"
+        "<i>Tekshiruvchi — qabul qiling va tekshiring</i>\n\n"
         f"ID: <b>#{insp.id}</b>\n"
         f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
-        f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
+        f"👤 Yuborgan teruvchi: <b>{insp.picker_name}</b>\n"
+        f"🔍 Tekshiruvchi: <b>kutilmoqda</b>\n"
         f"🕒 Yuborilgan vaqt: <b>{fmt_dt(insp.created_at)}</b>"
     )
 

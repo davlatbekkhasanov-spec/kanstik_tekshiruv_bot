@@ -15,7 +15,7 @@ def start_review_kb(inspection_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🔍 Tekshiruvni boshlash",
+                    text="✅ Qabul qilib tekshirishni boshlash",
                     callback_data=f"rev:start:{inspection_id}",
                 )
             ]

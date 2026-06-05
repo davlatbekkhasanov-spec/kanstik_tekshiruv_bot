@@ -11,7 +11,7 @@ from aiogram.types import CallbackQuery, Message
 from app.bot.keyboards import error_types_kb, picker_menu_kb, review_actions_kb, start_review_kb
 from app.bot.states import PickerStates, ReviewerStates
 from app.config import get_settings
-from app.constants import ErrorType
+from app.constants import ErrorType, UserRole
 from app.db.session import SessionLocal, require_session_local
 from app.services import inspection as svc
 from app.services import notify as ntf
@@ -124,9 +124,11 @@ async def picker_photo(message: Message, state: FSMContext, bot: Bot) -> None:
         await session.commit()
 
     await state.clear()
-    dest = "admin lichkasiga" if ntf.uses_private_notify(st) else "tekshiruv guruhiga"
+    dest = "tekshiruvchi lichkasiga" if ntf.uses_private_notify(st) else "tekshiruv guruhiga"
     await message.answer(
-        f"✅ Tekshiruvga yuborildi ({dest}).\nID: #{insp.id}",
+        f"✅ Tekshiruvchi ga yuborildi ({dest}).\n"
+        f"ID: #{insp.id}\n\n"
+        "Tekshiruvchi qabul qilib tekshirishni boshlaydi — natijani kuting.",
         reply_markup=picker_menu_kb(),
     )
 
@@ -159,6 +161,17 @@ async def cb_start_review(callback: CallbackQuery, bot: Bot) -> None:
             full_name=callback.from_user.full_name or "",
             admin_ids=st.admin_id_set(),
         )
+        allowed, reason = await svc.can_start_review(
+            session,
+            insp,
+            actor_telegram_id=callback.from_user.id,
+            admin_ids=st.admin_id_set(),
+        )
+        if not allowed:
+            await callback.answer(reason, show_alert=True)
+            return
+        if user.role == UserRole.picker:
+            user.role = UserRole.reviewer
         ok = await svc.start_review(session, insp, user)
         if not ok:
             await callback.answer("Allaqachon olingan yoki yakunlangan", show_alert=True)
