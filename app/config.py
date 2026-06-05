@@ -5,15 +5,7 @@ from functools import lru_cache
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
-def normalize_database_url(url: str) -> str:
-    """Railway postgres:// → async SQLAlchemy uchun postgresql+asyncpg://"""
-    u = (url or "").strip()
-    if u.startswith("postgres://"):
-        u = "postgresql+asyncpg://" + u[len("postgres://") :]
-    elif u.startswith("postgresql://") and "+asyncpg" not in u:
-        u = "postgresql+asyncpg://" + u[len("postgresql://") :]
-    return u
+from app.db.url import normalize_database_url
 
 
 class Settings(BaseSettings):

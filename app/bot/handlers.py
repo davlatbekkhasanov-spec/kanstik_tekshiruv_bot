@@ -41,8 +41,13 @@ async def cmd_start(message: Message) -> None:
     except Exception:
         log.exception("DB error on /start user=%s", message.from_user.id)
         await message.answer(
-            "⚠️ Bot bazaga ulanmadi.\n"
-            "Railway: PostgreSQL + DATABASE_URL + Redeploy tekshiring."
+            "⚠️ Bot bazaga ulanmadi.\n\n"
+            "Railway tekshiring:\n"
+            "1. Postgres servis → Variables → <code>DATABASE_URL</code> ni botga ulang\n"
+            "   (Add variable → Reference → Postgres → DATABASE_URL)\n"
+            "2. Redeploy qiling (migration ham ishlaydi)\n\n"
+            "Logda aniq xato: Deployments → View logs",
+            parse_mode="HTML",
         )
         return
     extra = ""

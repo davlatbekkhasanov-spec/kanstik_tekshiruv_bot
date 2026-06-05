@@ -9,6 +9,8 @@ from aiogram.types import ErrorEvent
 
 from app.bot.handlers import router
 from app.config import get_settings
+from app.db.session import SessionLocal
+from sqlalchemy import text
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,6 +33,13 @@ async def main() -> None:
         settings.setup_mode,
         sorted(settings.admin_id_set()),
     )
+
+    try:
+        async with SessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        log.info("Database connection OK")
+    except Exception as exc:
+        log.error("Database connection FAILED: %s", exc)
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
