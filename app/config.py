@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def normalize_database_url(url: str) -> str:
+    """Railway postgres:// → async SQLAlchemy uchun postgresql+asyncpg://"""
+    u = (url or "").strip()
+    if u.startswith("postgres://"):
+        u = "postgresql+asyncpg://" + u[len("postgres://") :]
+    elif u.startswith("postgresql://") and "+asyncpg" not in u:
+        u = "postgresql+asyncpg://" + u[len("postgresql://") :]
+    return u
 
 
 class Settings(BaseSettings):
@@ -17,6 +28,11 @@ class Settings(BaseSettings):
     tz: str = "Asia/Tashkent"
     daily_report_hour: int = 18
     daily_report_minute: int = 0
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _db_url(cls, v: object) -> str:
+        return normalize_database_url(str(v or ""))
 
     def admin_id_set(self) -> set[int]:
         out: set[int] = set()

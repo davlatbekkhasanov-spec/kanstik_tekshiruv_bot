@@ -30,13 +30,21 @@ def _is_admin(uid: int) -> bool:
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     st = _settings()
-    async with SessionLocal() as session:
-        await svc.get_or_create_user(
-            session,
-            telegram_id=message.from_user.id,
-            full_name=message.from_user.full_name or "",
-            admin_ids=st.admin_id_set(),
+    try:
+        async with SessionLocal() as session:
+            await svc.get_or_create_user(
+                session,
+                telegram_id=message.from_user.id,
+                full_name=message.from_user.full_name or "",
+                admin_ids=st.admin_id_set(),
+            )
+    except Exception:
+        log.exception("DB error on /start user=%s", message.from_user.id)
+        await message.answer(
+            "⚠️ Bot bazaga ulanmadi.\n"
+            "Railway: PostgreSQL + DATABASE_URL + Redeploy tekshiring."
         )
+        return
     extra = ""
     if ntf.uses_private_notify(st):
         extra = (

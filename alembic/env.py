@@ -13,7 +13,10 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+sync_url = settings.database_url.replace("+asyncpg", "")
+if sync_url.startswith("postgresql://"):
+    sync_url = "postgresql+psycopg2://" + sync_url[len("postgresql://") :]
+config.set_main_option("sqlalchemy.url", sync_url)
 
 
 def run_migrations_offline() -> None:
