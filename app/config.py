@@ -10,9 +10,10 @@ class Settings(BaseSettings):
 
     bot_token: str
     database_url: str
-    review_group_id: int
-    return_group_id: int
+    review_group_id: int = 0
+    return_group_id: int = 0
     admin_ids: str = ""
+    setup_mode: bool = True
     tz: str = "Asia/Tashkent"
     daily_report_hour: int = 18
     daily_report_minute: int = 0

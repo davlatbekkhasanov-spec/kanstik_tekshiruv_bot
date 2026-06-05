@@ -41,6 +41,7 @@ class Inspection(Base):
     reviewer_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=True)
     reviewer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     review_group_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    review_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     return_group_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     review_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
