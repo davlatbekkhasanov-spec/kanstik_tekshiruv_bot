@@ -1,9 +1,10 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import create_engine, pool
+from sqlalchemy import create_engine, pool, text
 
 from app.config import get_settings
+from app.db import bootstrap
 from app.db.base import Base
 from app.db import models  # noqa: F401
 from app.db.url import alembic_sync_url, sync_connect_args
@@ -14,8 +15,15 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 settings = get_settings()
-sync_url = alembic_sync_url(settings.database_url)
+sync_url = bootstrap.get_sync_url() or alembic_sync_url(settings.database_url)
 config.set_main_option("sqlalchemy.url", sync_url)
+
+
+def _connect_args() -> dict:
+    saved = bootstrap.get_sync_connect_args()
+    if saved is not None:
+        return saved
+    return sync_connect_args(settings.database_url)
 
 
 def run_migrations_offline() -> None:
@@ -26,10 +34,11 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    args = _connect_args()
     connectable = create_engine(
         sync_url,
         poolclass=pool.NullPool,
-        connect_args=sync_connect_args(settings.database_url),
+        connect_args=args,
     )
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)

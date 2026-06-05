@@ -9,7 +9,7 @@ from aiogram.types import ErrorEvent
 from sqlalchemy import text
 
 from app.config import get_settings
-from app.db.migrate import upgrade_head
+from app.db.bootstrap import run_migrations, setup_database
 from app.db.session import SessionLocal
 
 logging.basicConfig(
@@ -21,13 +21,12 @@ log = logging.getLogger(__name__)
 
 async def main() -> None:
     settings = get_settings()
-    if not settings.database_url:
-        log.error("DATABASE_URL / PGHOST topilmadi — Railway Postgres ulanganini tekshiring")
-    else:
-        try:
-            upgrade_head()
-        except Exception as exc:
-            log.error("Migration failed: %s", exc)
+    db_url = ""
+    try:
+        db_url, _ = await setup_database()
+        run_migrations(db_url)
+    except Exception as exc:
+        log.error("Database setup failed: %s", exc)
 
     from app.bot.handlers import router
 
@@ -37,19 +36,21 @@ async def main() -> None:
     )
     me = await bot.get_me()
     log.info(
-        "Bot started: @%s id=%s setup_mode=%s admins=%s",
+        "Bot started: @%s id=%s setup_mode=%s admins=%s db=%s",
         me.username,
         me.id,
         settings.setup_mode,
         sorted(settings.admin_id_set()),
+        bool(db_url),
     )
 
-    try:
-        async with SessionLocal() as session:
-            await session.execute(text("SELECT 1"))
-        log.info("Database connection OK")
-    except Exception as exc:
-        log.error("Database connection FAILED: %s", exc)
+    if SessionLocal is not None:
+        try:
+            async with SessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+            log.info("Database connection OK")
+        except Exception as exc:
+            log.error("Database connection FAILED: %s", exc)
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)

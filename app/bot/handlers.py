@@ -11,7 +11,7 @@ from app.bot.keyboards import error_types_kb, picker_menu_kb, review_actions_kb,
 from app.bot.states import PickerStates, ReviewerStates
 from app.config import get_settings
 from app.constants import ErrorType
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, require_session_local
 from app.services import inspection as svc
 from app.services import notify as ntf
 
@@ -30,25 +30,32 @@ def _is_admin(uid: int) -> bool:
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     st = _settings()
+    if SessionLocal is None:
+        await message.answer(
+            "⚠️ Bot bazasi hali tayyor emas.\n"
+            "Railway Deploy Logs ni tekshiring yoki 1 daqiqadan keyin qayta /start yuboring."
+        )
+        return
     try:
-        async with SessionLocal() as session:
+        async with require_session_local()() as session:
             await svc.get_or_create_user(
                 session,
                 telegram_id=message.from_user.id,
                 full_name=message.from_user.full_name or "",
                 admin_ids=st.admin_id_set(),
             )
-    except Exception:
+    except Exception as exc:
         log.exception("DB error on /start user=%s", message.from_user.id)
-        await message.answer(
-            "⚠️ Bot bazaga ulanmadi.\n\n"
-            "Railway tekshiring:\n"
-            "1. Postgres servis → Variables → <code>DATABASE_URL</code> ni botga ulang\n"
-            "   (Add variable → Reference → Postgres → DATABASE_URL)\n"
-            "2. Redeploy qiling (migration ham ishlaydi)\n\n"
-            "Logda aniq xato: Deployments → View logs",
-            parse_mode="HTML",
-        )
+        hint = str(exc).split("\n", maxsplit=1)[0][:120]
+        if _is_admin(message.from_user.id):
+            await message.answer(
+                f"⚠️ DB xato (admin):\n<code>{hint}</code>\n\n"
+                "Railway: Postgres → bot servisiga <b>Reference</b> "
+                "<code>DATABASE_URL</code> ulang va Redeploy.",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer("⚠️ Vaqtinchalik xato. Admin bilan bog‘laning.")
         return
     extra = ""
     if ntf.uses_private_notify(st):
@@ -90,7 +97,7 @@ async def picker_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     st = _settings()
     data = await state.get_data()
     photo = message.photo[-1]
-    async with SessionLocal() as session:
+    async with require_session_local()() as session:
         user = await svc.get_or_create_user(
             session,
             telegram_id=message.from_user.id,
@@ -140,7 +147,7 @@ def _review_chat(insp, callback: CallbackQuery, st) -> int:
 async def cb_start_review(callback: CallbackQuery, bot: Bot) -> None:
     st = _settings()
     insp_id = int(callback.data.split(":")[-1])
-    async with SessionLocal() as session:
+    async with require_session_local()() as session:
         insp = await svc.get_inspection(session, insp_id)
         if not insp:
             await callback.answer("Topilmadi", show_alert=True)
@@ -174,7 +181,7 @@ async def cb_start_review(callback: CallbackQuery, bot: Bot) -> None:
 async def cb_approve(callback: CallbackQuery, bot: Bot) -> None:
     st = _settings()
     insp_id = int(callback.data.split(":")[-1])
-    async with SessionLocal() as session:
+    async with require_session_local()() as session:
         insp = await svc.get_inspection(session, insp_id)
         if not insp:
             await callback.answer("Topilmadi", show_alert=True)
@@ -236,7 +243,7 @@ async def reviewer_error_photo(message: Message, state: FSMContext, bot: Bot) ->
     insp_id = int(data["inspection_id"])
     err_type = ErrorType(data["error_type"])
 
-    async with SessionLocal() as session:
+    async with require_session_local()() as session:
         insp = await svc.get_inspection(session, insp_id)
         if not insp:
             await message.answer("Inspection topilmadi.")
@@ -308,7 +315,7 @@ async def reviewer_photo_required(message: Message) -> None:
 async def cmd_daily(message: Message) -> None:
     if not _is_admin(message.from_user.id):
         return
-    async with SessionLocal() as session:
+    async with require_session_local()() as session:
         text = await svc.daily_report(session)
     await message.answer(text, parse_mode="HTML")
 
@@ -317,6 +324,6 @@ async def cmd_daily(message: Message) -> None:
 async def cmd_monthly(message: Message) -> None:
     if not _is_admin(message.from_user.id):
         return
-    async with SessionLocal() as session:
+    async with require_session_local()() as session:
         text = await svc.monthly_report(session)
     await message.answer(text, parse_mode="HTML")
