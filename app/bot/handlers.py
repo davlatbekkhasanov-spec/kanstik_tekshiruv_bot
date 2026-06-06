@@ -253,32 +253,13 @@ async def cb_error_type(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(ReviewerStates.error_comment, F.voice)
-async def reviewer_comment_voice(message: Message, state: FSMContext) -> None:
-    await state.update_data(
-        error_comment="🎤 Ovozli izoh",
-        error_voice_file_id=message.voice.file_id,
-    )
-    await state.set_state(ReviewerStates.error_photo)
-    await message.answer("📸 Xato rasmini yuboring:")
-
-
-@router.message(ReviewerStates.error_comment)
-async def reviewer_comment(message: Message, state: FSMContext) -> None:
-    comment = (message.text or "").strip()
-    if not comment:
-        await message.answer("Izoh yozing yoki ovozli xabar yuboring.")
-        return
-    await state.update_data(error_comment=comment, error_voice_file_id=None)
-    await state.set_state(ReviewerStates.error_photo)
-    await message.answer("📸 Xato rasmini yuboring:")
-
-
-@router.message(ReviewerStates.error_photo, F.photo)
-async def reviewer_error_photo(message: Message, state: FSMContext, bot: Bot) -> None:
+async def _finalize_return(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    data: dict,
+) -> None:
     st = _settings()
-    data = await state.get_data()
-    photo = message.photo[-1]
     insp_id = int(data["inspection_id"])
     err_type = ErrorType(data["error_type"])
 
@@ -294,7 +275,6 @@ async def reviewer_error_photo(message: Message, state: FSMContext, bot: Bot) ->
                 insp,
                 error_type=err_type,
                 error_comment=data["error_comment"],
-                error_photo_file_id=photo.file_id,
             )
             if not ok:
                 await message.answer("Holat mos emas. Avval tekshiruvni boshlang.")
@@ -313,7 +293,7 @@ async def reviewer_error_photo(message: Message, state: FSMContext, bot: Bot) ->
             ret = await ntf.send_photo_notice(
                 bot,
                 chat_ids=ret_chats,
-                photo_file_id=photo.file_id,
+                photo_file_id=insp.cargo_photo_file_id,
                 caption=text,
             )
             voice_id = data.get("error_voice_file_id")
@@ -324,19 +304,13 @@ async def reviewer_error_photo(message: Message, state: FSMContext, bot: Bot) ->
                     voice_file_id=voice_id,
                     caption="📝 Izoh (ovoz)",
                 )
-            await ntf.send_photo_notice(
-                bot,
-                chat_ids=ret_chats,
-                photo_file_id=insp.cargo_photo_file_id,
-                caption="📸 Dastlabki yuk rasmi",
-            )
             if ret:
                 insp.return_group_message_id = ret[1]
             review_chat = insp.review_chat_id or message.chat.id
             done_note = (
-                "Qayta terish guruhiga yuborildi."
+                "Teruvchi guruhiga yuborildi."
                 if not ntf.uses_private_notify(st)
-                else "Admin lichkasiga yuborildi (test rejim)."
+                else "Teruvchiga yuborildi (test rejim)."
             )
             if not await ntf.edit_photo_caption(
                 bot,
@@ -351,16 +325,31 @@ async def reviewer_error_photo(message: Message, state: FSMContext, bot: Bot) ->
         await state.clear()
         await message.answer("✅ Xato qayd etildi.")
     except Exception:
-        log.exception("reviewer_error_photo failed insp=%s", insp_id)
+        log.exception("finalize_return failed insp=%s", insp_id)
         await message.answer(
             "⚠️ Xato saqlanmadi. Qayta urinib ko‘ring yoki admin bilan bog‘laning."
         )
         await state.clear()
 
 
-@router.message(ReviewerStates.error_photo)
-async def reviewer_photo_required(message: Message) -> None:
-    await message.answer("Xato rasmini yuboring (foto).")
+@router.message(ReviewerStates.error_comment, F.voice)
+async def reviewer_comment_voice(message: Message, state: FSMContext, bot: Bot) -> None:
+    data = await state.get_data()
+    data["error_comment"] = "🎤 Ovozli izoh"
+    data["error_voice_file_id"] = message.voice.file_id
+    await _finalize_return(message, state, bot, data)
+
+
+@router.message(ReviewerStates.error_comment)
+async def reviewer_comment(message: Message, state: FSMContext, bot: Bot) -> None:
+    comment = (message.text or "").strip()
+    if not comment:
+        await message.answer("Izoh yozing yoki ovozli xabar yuboring.")
+        return
+    data = await state.get_data()
+    data["error_comment"] = comment
+    data["error_voice_file_id"] = None
+    await _finalize_return(message, state, bot, data)
 
 
 @router.message(Command("navbat"))

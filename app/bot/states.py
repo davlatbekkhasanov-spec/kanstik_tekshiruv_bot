@@ -8,4 +8,3 @@ class PickerStates(StatesGroup):
 
 class ReviewerStates(StatesGroup):
     error_comment = State()
-    error_photo = State()

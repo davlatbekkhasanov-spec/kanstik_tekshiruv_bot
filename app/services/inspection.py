@@ -140,7 +140,7 @@ async def return_inspection(
     *,
     error_type: ErrorType,
     error_comment: str,
-    error_photo_file_id: str,
+    error_photo_file_id: str = "",
 ) -> bool:
     if inspection.status != InspectionStatus.in_review:
         return False
@@ -242,7 +242,7 @@ def approved_text(insp: Inspection) -> str:
 def returned_text(insp: Inspection, err: InspectionError) -> str:
     wait = wait_label(insp, insp.review_started_at)
     return (
-        "🚨 <b>QAYTA TERISH KERAK</b>\n\n"
+        "🚨 <b>XATONI TUZATING</b>\n\n"
         f"ID: <b>#{insp.id}</b>\n"
         f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
         f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
