@@ -416,13 +416,15 @@ async def cb_approve(callback: CallbackQuery, bot: Bot) -> None:
                 reply_markup=None,
             )
             if insp.review_chat_id and insp.review_group_message_id:
-                await ntf.edit_photo_caption(
-                    bot,
-                    chat_id=int(insp.review_chat_id),
-                    message_id=int(insp.review_group_message_id),
-                    caption=text,
-                    reply_markup=None,
-                )
+                nav = svc.group_nav_done_text(insp)
+                if int(insp.review_group_message_id) != callback.message.message_id:
+                    await ntf.edit_photo_caption(
+                        bot,
+                        chat_id=int(insp.review_chat_id),
+                        message_id=int(insp.review_group_message_id),
+                        caption=nav,
+                        reply_markup=None,
+                    )
         else:
             chat_id = _review_chat(insp, callback, st)
             msg_id = insp.review_group_message_id or callback.message.message_id
@@ -722,38 +724,39 @@ async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
                 await callback.answer("Holat mos emas", show_alert=True)
                 return
             await session.refresh(insp)
-            text = svc.fix_confirmed_text(insp)
+            full_text = svc.fix_confirmed_text(insp)
 
             if ntf.uses_group_workflow(st):
-                await ntf.edit_photo_caption(
-                    bot,
-                    chat_id=callback.message.chat.id,
-                    message_id=callback.message.message_id,
-                    caption=text,
-                    reply_markup=None,
-                )
+                targets: list[tuple[int, int, str]] = [
+                    (
+                        callback.message.chat.id,
+                        callback.message.message_id,
+                        full_text,
+                    ),
+                ]
                 if insp.review_chat_id and insp.review_group_message_id:
-                    await ntf.edit_photo_caption(
-                        bot,
-                        chat_id=int(insp.review_chat_id),
-                        message_id=int(insp.review_group_message_id),
-                        caption=text,
-                        reply_markup=None,
+                    targets.append(
+                        (
+                            int(insp.review_chat_id),
+                            int(insp.review_group_message_id),
+                            svc.group_nav_done_text(insp, via_fix=True),
+                        )
                     )
                 if insp.return_chat_id and insp.return_group_message_id:
-                    await ntf.edit_photo_caption(
-                        bot,
-                        chat_id=int(insp.return_chat_id),
-                        message_id=int(insp.return_group_message_id),
-                        caption=text,
-                        reply_markup=None,
+                    targets.append(
+                        (
+                            int(insp.return_chat_id),
+                            int(insp.return_group_message_id),
+                            svc.group_error_fixed_text(insp),
+                        )
                     )
+                await ntf.edit_unique_captions(bot, targets=targets)
                 if insp.picker_return_chat_id and insp.picker_return_message_id:
                     await ntf.edit_photo_caption(
                         bot,
                         chat_id=int(insp.picker_return_chat_id),
                         message_id=int(insp.picker_return_message_id),
-                        caption=text,
+                        caption=full_text,
                         reply_markup=None,
                     )
             else:
@@ -761,7 +764,7 @@ async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
                     bot,
                     chat_id=callback.message.chat.id,
                     message_id=callback.message.message_id,
-                    caption=text,
+                    caption=full_text,
                     reply_markup=None,
                 )
                 if insp.review_chat_id and insp.review_group_message_id:
@@ -773,7 +776,7 @@ async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
                             bot,
                             chat_id=int(insp.review_chat_id),
                             message_id=int(insp.review_group_message_id),
-                            caption=text,
+                            caption=full_text,
                             reply_markup=None,
                         )
 

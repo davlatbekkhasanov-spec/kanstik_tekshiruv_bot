@@ -151,3 +151,25 @@ async def send_voice_notice(
             await bot.send_voice(cid, voice_file_id, caption=caption)
         except Exception:
             log.exception("send_voice chat_id=%s", cid)
+
+
+async def edit_unique_captions(
+    bot: Bot,
+    *,
+    targets: list[tuple[int, int, str]],
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """Har bir (chat_id, message_id) faqat bir marta tahrirlanadi."""
+    seen: set[tuple[int, int]] = set()
+    for chat_id, message_id, caption in targets:
+        key = (int(chat_id), int(message_id))
+        if key in seen:
+            continue
+        seen.add(key)
+        await edit_photo_caption(
+            bot,
+            chat_id=key[0],
+            message_id=key[1],
+            caption=caption,
+            reply_markup=reply_markup,
+        )

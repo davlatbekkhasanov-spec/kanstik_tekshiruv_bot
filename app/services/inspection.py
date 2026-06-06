@@ -260,6 +260,26 @@ def group_fix_pending_text(insp: Inspection) -> str:
     )
 
 
+def group_nav_done_text(insp: Inspection, *, via_fix: bool = False) -> str:
+    """Navbatdagi asl xabar — qisqa yakun."""
+    note = "Xato tuzatilib tasdiqlandi" if via_fix else "Xatosiz tasdiqlandi"
+    return (
+        f"✅ <b>#{insp.id} TUGADI</b>\n"
+        f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+        f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
+        f"<i>{note}</i>"
+    )
+
+
+def group_error_fixed_text(insp: Inspection) -> str:
+    """Xato xabari — alohida qisqa holat."""
+    return (
+        f"✅ <b>XATO TUZATILDI</b> · #{insp.id}\n"
+        f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+        f"👤 Teruvchi: <b>{insp.picker_name}</b>"
+    )
+
+
 def pending_inspection_text(insp: Inspection, *, now: datetime | None = None) -> str:
     now = now or datetime.now(_tz())
     mins = wait_minutes(insp, now)
