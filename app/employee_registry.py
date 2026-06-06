@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 TUVALOV_FARRUX_TG_ID = 7703650930
+PRIMARY_ADMIN_TG_ID = 1432810519
 CANONICAL_TUVALOV = "Tuvalov Farrux"
 
 PULAT_LEGACY_NAMES: frozenset[str] = frozenset(
@@ -34,6 +35,7 @@ TG_EMPLOYEE: dict[int, str] = {
     6001619806: "Samadov Tulqin",
     5732350707: "Toxirov Muslimbek",
     8440127425: "Ravshanov Ziyodullo",
+    1432810519: "Davlatbek Khasanov",
     TUVALOV_FARRUX_TG_ID: CANONICAL_TUVALOV,
 }
 
@@ -57,6 +59,7 @@ EMPLOYEE_NAME_ALIASES: dict[str, int] = {
     "Толиб Шерназаров": 5465963344,
     "Sagdullaev Yunus": 6991673998,
     "Sagdullaev": 6991673998,
+    "Davlatbek Khasanov": 1432810519,
     CANONICAL_TUVALOV: TUVALOV_FARRUX_TG_ID,
     "Тувалов Фаррух": TUVALOV_FARRUX_TG_ID,
     "Тувалов Farrux": TUVALOV_FARRUX_TG_ID,

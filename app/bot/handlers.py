@@ -38,7 +38,7 @@ def _is_admin(uid: int) -> bool:
 
 def _staff_denied(uid: int) -> str:
     return (
-        "⛔ Bu bot faqat Kanstik jamoasi (10 kishi) uchun.\n"
+        "⛔ Bu bot faqat Kanstik jamoasi uchun.\n"
         f"Sizning ID: <code>{uid}</code>"
     )
 
@@ -82,12 +82,15 @@ async def cmd_start(message: Message) -> None:
             return
 
         async with require_session_local()() as session:
-            await svc.get_or_create_user(
+            user = await svc.get_or_create_user(
                 session,
                 telegram_id=message.from_user.id,
                 full_name=message.from_user.full_name or "",
                 admin_ids=st.admin_id_set(),
             )
+
+        if user.role == UserRole.admin:
+            extra += "\n\n👑 <b>Admin</b> — /daily, /monthly, /navbat"
 
         await message.answer(
             welcome + extra,

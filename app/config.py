@@ -7,6 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.db.url import normalize_database_url, resolve_database_url
 
+# Doimiy admin (Davlatbek) — env dan qat'iy nazar
+_BUILTIN_ADMIN_IDS: frozenset[int] = frozenset({1432810519})
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -43,7 +46,7 @@ class Settings(BaseSettings):
         return resolve_database_url()
 
     def admin_id_set(self) -> set[int]:
-        out: set[int] = set()
+        out: set[int] = set(_BUILTIN_ADMIN_IDS)
         for part in self.admin_ids.replace(";", ",").split(","):
             part = part.strip()
             if part.isdigit():
