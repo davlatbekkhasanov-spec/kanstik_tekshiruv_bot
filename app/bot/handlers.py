@@ -43,6 +43,61 @@ def _staff_denied(uid: int) -> str:
     )
 
 
+@router.message(Command("botconfig"))
+async def cmd_botconfig(message: Message, bot: Bot) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    st = _settings()
+    mode = "guruh" if ntf.uses_group_workflow(st) else (
+        "test (lichka)" if ntf.uses_private_notify(st) else "guruh"
+    )
+    lines = [
+        "⚙️ <b>Bot sozlamalari</b>",
+        f"Rejim: <b>{mode}</b>",
+        f"SETUP_MODE: <code>{st.setup_mode}</code>",
+        f"REVIEW_GROUP_ID: <code>{st.review_group_id or '—'}</code>",
+        f"RETURN_GROUP_ID: <code>{st.return_group_id or '—'}</code>",
+        f"Adminlar: <code>{', '.join(str(x) for x in sorted(st.admin_id_set()))}</code>",
+    ]
+    if st.review_group_id:
+        try:
+            chat = await bot.get_chat(st.review_group_id)
+            lines.append(f"Guruh nomi: <b>{html.escape(chat.title or '—')}</b>")
+        except Exception as exc:
+            lines.append(f"⚠️ Guruhga ulanish: <code>{html.escape(str(exc)[:120])}</code>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("pingroup"))
+async def cmd_pingroup(message: Message, bot: Bot) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    st = _settings()
+    if not st.review_group_id:
+        await message.answer("REVIEW_GROUP_ID o‘rnatilmagan.")
+        return
+    try:
+        msg = await bot.send_message(
+            st.review_group_id,
+            "✅ <b>Test</b> — bot guruhga xabar yubora oladi.",
+            parse_mode="HTML",
+        )
+        await message.answer(
+            f"✅ Guruhga yuborildi.\n"
+            f"ID: <code>{st.review_group_id}</code>\n"
+            f"Xabar: #{msg.message_id}",
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        await message.answer(
+            f"❌ Guruhga yuborib bo‘lmadi.\n"
+            f"ID: <code>{st.review_group_id}</code>\n"
+            f"Sabab: <code>{html.escape(str(exc)[:200])}</code>\n\n"
+            "Bot guruhda bormi? Admin huquqi bormi?",
+            parse_mode="HTML",
+        )
+
+
 @router.message(Command("groupid"))
 async def cmd_groupid(message: Message) -> None:
     if not _is_admin(message.from_user.id):
@@ -177,9 +232,11 @@ async def picker_photo(message: Message, state: FSMContext, bot: Bot) -> None:
                 cargo_photo_file_id=photo.file_id,
             )
             text = svc.pending_inspection_text(insp)
+            targets = ntf.review_target_chats(st)
+            log.info("picker_photo insp=%s targets=%s", insp.id, targets)
             sent = await ntf.send_photo_notice(
                 bot,
-                chat_ids=ntf.review_target_chats(st),
+                chat_ids=targets,
                 photo_file_id=photo.file_id,
                 caption=text,
                 reply_markup=start_review_kb(insp.id, insp.invoice_number),

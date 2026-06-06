@@ -25,6 +25,23 @@ class Settings(BaseSettings):
     daily_report_minute: int = 0
     pending_refresh_seconds: int = 60
 
+    @staticmethod
+    def _parse_group_id(v: object) -> int:
+        if v is None:
+            return 0
+        s = str(v).strip().strip('"').strip("'")
+        if not s or s.lower() in ("0", "none", "null", "—", "-"):
+            return 0
+        try:
+            return int(s)
+        except ValueError:
+            return 0
+
+    @field_validator("review_group_id", "return_group_id", mode="before")
+    @classmethod
+    def _group_id(cls, v: object) -> int:
+        return cls._parse_group_id(v)
+
     @model_validator(mode="before")
     @classmethod
     def _fill_database_url(cls, data: object) -> object:
