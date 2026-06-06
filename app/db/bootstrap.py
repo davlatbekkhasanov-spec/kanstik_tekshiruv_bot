@@ -97,6 +97,17 @@ def ensure_inspection_schema(url: str) -> None:
                     )
                 )
                 log.info("Added column inspections.fix_submitted_at")
+            for col in (
+                "reviewer_dm_chat_id",
+                "reviewer_dm_message_id",
+                "picker_return_chat_id",
+                "picker_return_message_id",
+                "confirm_chat_id",
+                "confirm_message_id",
+            ):
+                if col not in cols:
+                    conn.execute(text(f"ALTER TABLE inspections ADD COLUMN {col} BIGINT"))
+                    log.info("Added column inspections.%s", col)
         with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
             conn.execute(
                 text(

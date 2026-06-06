@@ -231,6 +231,35 @@ async def list_pending(session: AsyncSession) -> list[Inspection]:
     return list(rows.all())
 
 
+def group_claimed_text(insp: Inspection) -> str:
+    return (
+        "✅ <b>QABUL QILINDI</b>\n\n"
+        f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+        f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
+        f"🔍 Tekshiruvchi: <b>{insp.reviewer_name}</b>\n"
+        f"<i>Tekshiruv tekshiruvchi lichkasida davom etmoqda</i>"
+    )
+
+
+def group_error_sent_text(insp: Inspection) -> str:
+    return (
+        "🚨 <b>XATO TOPILDI</b>\n\n"
+        f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+        f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
+        f"🔍 Tekshiruvchi: <b>{insp.reviewer_name}</b>\n"
+        f"<i>Teruvchi guruhiga va lichkasiga yuborildi</i>"
+    )
+
+
+def group_fix_pending_text(insp: Inspection) -> str:
+    return (
+        "⏳ <b>TUZATISH KUTILMOQDA</b>\n\n"
+        f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+        f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
+        f"<i>Teruvchi tuzatishini tasdiqlang</i>"
+    )
+
+
 def pending_inspection_text(insp: Inspection, *, now: datetime | None = None) -> str:
     now = now or datetime.now(_tz())
     mins = wait_minutes(insp, now)

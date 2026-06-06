@@ -15,6 +15,29 @@ def uses_private_notify(settings: Settings) -> bool:
     return settings.setup_mode
 
 
+def uses_group_workflow(settings: Settings) -> bool:
+    """Teruvchi lichka → guruh; tekshiruvchi lichkada davom etadi."""
+    return not uses_private_notify(settings) and bool(settings.review_group_id)
+
+
+def error_group_chats(settings: Settings) -> list[int]:
+    if uses_private_notify(settings):
+        return sorted(settings.admin_id_set())
+    if settings.return_group_id:
+        return [settings.return_group_id]
+    if settings.review_group_id:
+        return [settings.review_group_id]
+    return sorted(settings.admin_id_set())
+
+
+def confirm_group_chats(settings: Settings) -> list[int]:
+    if uses_private_notify(settings):
+        return sorted(settings.admin_id_set())
+    if settings.review_group_id:
+        return [settings.review_group_id]
+    return sorted(settings.admin_id_set())
+
+
 def review_target_chats(settings: Settings) -> list[int]:
     if uses_private_notify(settings):
         return sorted(settings.admin_id_set())

@@ -160,7 +160,9 @@ async def picker_photo(message: Message, state: FSMContext, bot: Bot) -> None:
             await session.commit()
 
         await state.clear()
-        dest = "tekshiruvchi lichkasiga" if ntf.uses_private_notify(st) else "tekshiruv guruhiga"
+        dest = "tekshiruv guruhiga" if ntf.uses_group_workflow(st) else (
+            "tekshiruvchi lichkasiga" if ntf.uses_private_notify(st) else "tekshiruv guruhiga"
+        )
         await message.answer(
             f"✅ Tekshiruvchi ga yuborildi ({dest}).\n"
             f"ID: #{insp.id} | Faktura: {insp.invoice_number}\n\n"
@@ -188,6 +190,15 @@ def _review_chat(insp, callback: CallbackQuery, st) -> int:
     if ntf.uses_private_notify(st):
         return callback.message.chat.id
     return st.review_group_id
+
+
+async def _notify_picker(bot: Bot, picker_tg: int | None, text: str) -> None:
+    if not picker_tg:
+        return
+    try:
+        await bot.send_message(picker_tg, text, parse_mode="HTML")
+    except Exception:
+        log.exception("picker notify failed tg=%s", picker_tg)
 
 
 @router.callback_query(F.data.startswith("rev:start:"))
@@ -222,30 +233,61 @@ async def cb_start_review(callback: CallbackQuery, bot: Bot) -> None:
             return
         await session.refresh(insp)
         text = svc.in_review_text(insp)
-        chat_id = _review_chat(insp, callback, st)
-        msg_id = insp.review_group_message_id or callback.message.message_id
-        if not await ntf.edit_photo_caption(
-            bot,
-            chat_id=chat_id,
-            message_id=msg_id,
-            caption=text,
-            reply_markup=review_actions_kb(insp.id),
-        ):
-            await ntf.send_text_notice(bot, chat_ids=[chat_id], text=text)
+        reviewer_tg = callback.from_user.id
         wait = svc.wait_label(insp, insp.review_started_at)
+
+        if ntf.uses_group_workflow(st):
+            group_chat = _review_chat(insp, callback, st)
+            group_msg = insp.review_group_message_id or callback.message.message_id
+            await ntf.edit_photo_caption(
+                bot,
+                chat_id=group_chat,
+                message_id=group_msg,
+                caption=svc.group_claimed_text(insp),
+                reply_markup=None,
+            )
+            dm = await ntf.send_photo_notice(
+                bot,
+                chat_ids=[reviewer_tg],
+                photo_file_id=insp.cargo_photo_file_id,
+                caption=text,
+                reply_markup=review_actions_kb(insp.id),
+            )
+            if dm:
+                insp.reviewer_dm_chat_id, insp.reviewer_dm_message_id = dm
+        else:
+            chat_id = _review_chat(insp, callback, st)
+            msg_id = insp.review_group_message_id or callback.message.message_id
+            if not await ntf.edit_photo_caption(
+                bot,
+                chat_id=chat_id,
+                message_id=msg_id,
+                caption=text,
+                reply_markup=review_actions_kb(insp.id),
+            ):
+                await ntf.send_text_notice(bot, chat_ids=[chat_id], text=text)
+
         picker_tg = await svc.picker_telegram_id(session, insp)
-        if picker_tg:
-            try:
-                await bot.send_message(
-                    picker_tg,
-                    f"🔍 Tekshiruvchi qabul qildi.\n"
-                    f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
-                    f"⏳ Kutish vaqti: <b>{wait}</b>",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                log.exception("picker notify failed tg=%s", picker_tg)
+        await _notify_picker(
+            bot,
+            picker_tg,
+            f"🔍 Tekshiruvchi qabul qildi.\n"
+            f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+            f"⏳ Kutish vaqti: <b>{wait}</b>",
+        )
+        await session.commit()
     await callback.answer(f"Qabul qilindi. Kutish: {wait}")
+
+
+def _reviewer_controls_chat(insp, callback: CallbackQuery, st) -> bool:
+    if not ntf.uses_group_workflow(st):
+        return True
+    if insp.reviewer_dm_message_id and insp.reviewer_dm_chat_id:
+        return (
+            callback.message.chat.id == int(insp.reviewer_dm_chat_id)
+            and callback.message.message_id == int(insp.reviewer_dm_message_id)
+        )
+    return callback.message.chat.type == "private"
 
 
 @router.callback_query(F.data.startswith("rev:ok:"))
@@ -257,22 +299,50 @@ async def cb_approve(callback: CallbackQuery, bot: Bot) -> None:
         if not insp:
             await callback.answer("Topilmadi", show_alert=True)
             return
+        if not _reviewer_controls_chat(insp, callback, st):
+            await callback.answer("Tekshiruvni lichkangizdagi xabardan tasdiqlang", show_alert=True)
+            return
         ok = await svc.approve_inspection(session, insp)
         if not ok:
             await callback.answer("Holat mos emas", show_alert=True)
             return
         await session.refresh(insp)
         text = svc.approved_text(insp)
-        chat_id = _review_chat(insp, callback, st)
-        msg_id = insp.review_group_message_id or callback.message.message_id
-        if not await ntf.edit_photo_caption(
+
+        if ntf.uses_group_workflow(st):
+            await ntf.edit_photo_caption(
+                bot,
+                chat_id=callback.message.chat.id,
+                message_id=callback.message.message_id,
+                caption=text,
+                reply_markup=None,
+            )
+            if insp.review_chat_id and insp.review_group_message_id:
+                await ntf.edit_photo_caption(
+                    bot,
+                    chat_id=int(insp.review_chat_id),
+                    message_id=int(insp.review_group_message_id),
+                    caption=text,
+                    reply_markup=None,
+                )
+        else:
+            chat_id = _review_chat(insp, callback, st)
+            msg_id = insp.review_group_message_id or callback.message.message_id
+            if not await ntf.edit_photo_caption(
+                bot,
+                chat_id=chat_id,
+                message_id=msg_id,
+                caption=text,
+                reply_markup=None,
+            ):
+                await ntf.send_text_notice(bot, chat_ids=[chat_id], text=text)
+
+        picker_tg = await svc.picker_telegram_id(session, insp)
+        await _notify_picker(
             bot,
-            chat_id=chat_id,
-            message_id=msg_id,
-            caption=text,
-            reply_markup=None,
-        ):
-            await ntf.send_text_notice(bot, chat_ids=[chat_id], text=text)
+            picker_tg,
+            f"✅ Tasdiqlandi.\n📄 Faktura: <b>{insp.invoice_number}</b>",
+        )
     await callback.answer("Tasdiqlandi")
 
 
@@ -333,44 +403,95 @@ async def _finalize_return(
 
             await session.refresh(insp)
             text = svc.returned_text(insp, err)
-            ret_chats = ntf.unique_chat_ids(ntf.return_target_chats(st))
-            picker_tg = await svc.picker_telegram_id(session, insp)
-            targets = list(ret_chats)
-            if picker_tg and picker_tg not in ret_chats:
-                targets.append(picker_tg)
-            targets = ntf.unique_chat_ids(targets)
-            ret = await ntf.send_photo_notice(
-                bot,
-                chat_ids=targets,
-                photo_file_id=insp.cargo_photo_file_id,
-                caption=text + "\n\n👇 Tuzatgach tugmani bosing:",
-                reply_markup=picker_fix_kb(insp.id),
-            )
+            fix_caption = text + "\n\n👇 Tuzatgach tugmani bosing:"
             voice_id = data.get("error_voice_file_id")
-            if voice_id:
-                await ntf.send_voice_notice(
+
+            if ntf.uses_group_workflow(st):
+                if insp.reviewer_dm_chat_id and insp.reviewer_dm_message_id:
+                    await ntf.edit_photo_caption(
+                        bot,
+                        chat_id=int(insp.reviewer_dm_chat_id),
+                        message_id=int(insp.reviewer_dm_message_id),
+                        caption=text + "\n\n<i>Xato qayd etildi — teruvchiga yuborildi</i>",
+                        reply_markup=None,
+                    )
+                group_ret = await ntf.send_photo_notice(
+                    bot,
+                    chat_ids=ntf.error_group_chats(st),
+                    photo_file_id=insp.cargo_photo_file_id,
+                    caption=fix_caption,
+                    reply_markup=picker_fix_kb(insp.id),
+                )
+                picker_tg = await svc.picker_telegram_id(session, insp)
+                picker_ret = None
+                if picker_tg:
+                    picker_ret = await ntf.send_photo_notice(
+                        bot,
+                        chat_ids=[picker_tg],
+                        photo_file_id=insp.cargo_photo_file_id,
+                        caption=fix_caption,
+                        reply_markup=picker_fix_kb(insp.id),
+                    )
+                    if voice_id:
+                        await ntf.send_voice_notice(
+                            bot,
+                            chat_ids=[picker_tg],
+                            voice_file_id=voice_id,
+                            caption="📝 Izoh (ovoz)",
+                        )
+                if group_ret:
+                    insp.return_chat_id, insp.return_group_message_id = group_ret
+                if picker_ret:
+                    insp.picker_return_chat_id, insp.picker_return_message_id = picker_ret
+                if voice_id and group_ret:
+                    await ntf.send_voice_notice(
+                        bot,
+                        chat_ids=ntf.error_group_chats(st),
+                        voice_file_id=voice_id,
+                        caption="📝 Izoh (ovoz)",
+                    )
+                if insp.review_chat_id and insp.review_group_message_id:
+                    await ntf.edit_photo_caption(
+                        bot,
+                        chat_id=int(insp.review_chat_id),
+                        message_id=int(insp.review_group_message_id),
+                        caption=svc.group_error_sent_text(insp),
+                        reply_markup=None,
+                    )
+            else:
+                ret_chats = ntf.unique_chat_ids(ntf.return_target_chats(st))
+                picker_tg = await svc.picker_telegram_id(session, insp)
+                targets = list(ret_chats)
+                if picker_tg and picker_tg not in ret_chats:
+                    targets.append(picker_tg)
+                targets = ntf.unique_chat_ids(targets)
+                ret = await ntf.send_photo_notice(
                     bot,
                     chat_ids=targets,
-                    voice_file_id=voice_id,
-                    caption="📝 Izoh (ovoz)",
+                    photo_file_id=insp.cargo_photo_file_id,
+                    caption=fix_caption,
+                    reply_markup=picker_fix_kb(insp.id),
                 )
-            if ret:
-                insp.return_group_message_id = ret[1]
-                insp.return_chat_id = ret[0]
-            review_chat = insp.review_chat_id or message.chat.id
-            done_note = (
-                "Teruvchi guruhiga yuborildi."
-                if not ntf.uses_private_notify(st)
-                else "Teruvchiga yuborildi (test rejim)."
-            )
-            if not await ntf.edit_photo_caption(
-                bot,
-                chat_id=review_chat,
-                message_id=insp.review_group_message_id,
-                caption=text + f"\n\n<i>{done_note}</i>",
-                reply_markup=None,
-            ):
-                await ntf.send_text_notice(bot, chat_ids=[review_chat], text=text)
+                if voice_id:
+                    await ntf.send_voice_notice(
+                        bot,
+                        chat_ids=targets,
+                        voice_file_id=voice_id,
+                        caption="📝 Izoh (ovoz)",
+                    )
+                if ret:
+                    insp.return_group_message_id = ret[1]
+                    insp.return_chat_id = ret[0]
+                review_chat = insp.review_chat_id or message.chat.id
+                done_note = "Teruvchiga yuborildi (test rejim)."
+                if not await ntf.edit_photo_caption(
+                    bot,
+                    chat_id=review_chat,
+                    message_id=insp.review_group_message_id,
+                    caption=text + f"\n\n<i>{done_note}</i>",
+                    reply_markup=None,
+                ):
+                    await ntf.send_text_notice(bot, chat_ids=[review_chat], text=text)
             await session.commit()
 
         await state.clear()
@@ -423,25 +544,65 @@ async def cb_fix_done(callback: CallbackQuery, bot: Bot) -> None:
                 return
             await session.refresh(insp)
             confirm_text = svc.fix_submitted_text(insp)
-            await ntf.edit_photo_caption(
-                bot,
-                chat_id=callback.message.chat.id,
-                message_id=callback.message.message_id,
-                caption=confirm_text,
-                reply_markup=reviewer_confirm_fix_kb(insp.id),
-            )
-            reviewer_tg = await svc.reviewer_telegram_id(session, insp)
-            if (
-                reviewer_tg
-                and reviewer_tg != callback.message.chat.id
-            ):
-                await ntf.send_photo_notice(
+
+            if ntf.uses_group_workflow(st):
+                await ntf.edit_photo_caption(
                     bot,
-                    chat_ids=[reviewer_tg],
+                    chat_id=callback.message.chat.id,
+                    message_id=callback.message.message_id,
+                    caption=confirm_text + "\n\n<i>Tekshiruvchi guruhida tasdiqlanadi</i>",
+                    reply_markup=None,
+                )
+                if (
+                    insp.picker_return_chat_id
+                    and insp.picker_return_message_id
+                    and (
+                        int(insp.picker_return_chat_id) != callback.message.chat.id
+                        or int(insp.picker_return_message_id) != callback.message.message_id
+                    )
+                ):
+                    await ntf.edit_photo_caption(
+                        bot,
+                        chat_id=int(insp.picker_return_chat_id),
+                        message_id=int(insp.picker_return_message_id),
+                        caption=confirm_text + "\n\n<i>Guruhda tasdiqlanadi</i>",
+                        reply_markup=None,
+                    )
+                confirm = await ntf.send_photo_notice(
+                    bot,
+                    chat_ids=ntf.confirm_group_chats(st),
                     photo_file_id=insp.cargo_photo_file_id,
                     caption=confirm_text,
                     reply_markup=reviewer_confirm_fix_kb(insp.id),
                 )
+                if confirm:
+                    insp.confirm_chat_id, insp.confirm_message_id = confirm
+                if insp.review_chat_id and insp.review_group_message_id:
+                    await ntf.edit_photo_caption(
+                        bot,
+                        chat_id=int(insp.review_chat_id),
+                        message_id=int(insp.review_group_message_id),
+                        caption=svc.group_fix_pending_text(insp),
+                        reply_markup=None,
+                    )
+            else:
+                await ntf.edit_photo_caption(
+                    bot,
+                    chat_id=callback.message.chat.id,
+                    message_id=callback.message.message_id,
+                    caption=confirm_text,
+                    reply_markup=reviewer_confirm_fix_kb(insp.id),
+                )
+                reviewer_tg = await svc.reviewer_telegram_id(session, insp)
+                if reviewer_tg and reviewer_tg != callback.message.chat.id:
+                    await ntf.send_photo_notice(
+                        bot,
+                        chat_ids=[reviewer_tg],
+                        photo_file_id=insp.cargo_photo_file_id,
+                        caption=confirm_text,
+                        reply_markup=reviewer_confirm_fix_kb(insp.id),
+                    )
+            await session.commit()
         await callback.answer("Tekshiruvchi tasdig'i so'raldi ✅")
     except Exception:
         log.exception("fix:done failed insp=%s", insp_id)
@@ -450,6 +611,7 @@ async def cb_fix_done(callback: CallbackQuery, bot: Bot) -> None:
 
 @router.callback_query(F.data.startswith("fix:ok:"))
 async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
+    st = _settings()
     insp_id = int(callback.data.split(":")[-1])
     try:
         async with require_session_local()() as session:
@@ -463,18 +625,16 @@ async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
                 return
             await session.refresh(insp)
             text = svc.fix_confirmed_text(insp)
-            await ntf.edit_photo_caption(
-                bot,
-                chat_id=callback.message.chat.id,
-                message_id=callback.message.message_id,
-                caption=text,
-                reply_markup=None,
-            )
-            if insp.review_chat_id and insp.review_group_message_id:
-                if (
-                    int(insp.review_chat_id) != callback.message.chat.id
-                    or int(insp.review_group_message_id) != callback.message.message_id
-                ):
+
+            if ntf.uses_group_workflow(st):
+                await ntf.edit_photo_caption(
+                    bot,
+                    chat_id=callback.message.chat.id,
+                    message_id=callback.message.message_id,
+                    caption=text,
+                    reply_markup=None,
+                )
+                if insp.review_chat_id and insp.review_group_message_id:
                     await ntf.edit_photo_caption(
                         bot,
                         chat_id=int(insp.review_chat_id),
@@ -482,16 +642,50 @@ async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
                         caption=text,
                         reply_markup=None,
                     )
-            picker_tg = await svc.picker_telegram_id(session, insp)
-            if picker_tg and picker_tg != callback.message.chat.id:
-                try:
-                    await bot.send_message(
-                        picker_tg,
-                        f"✅ Tekshiruvchi tasdiqladi.\n📄 Faktura: <b>{insp.invoice_number}</b>",
-                        parse_mode="HTML",
+                if insp.return_chat_id and insp.return_group_message_id:
+                    await ntf.edit_photo_caption(
+                        bot,
+                        chat_id=int(insp.return_chat_id),
+                        message_id=int(insp.return_group_message_id),
+                        caption=text,
+                        reply_markup=None,
                     )
-                except Exception:
-                    log.exception("picker confirm notify failed")
+                if insp.picker_return_chat_id and insp.picker_return_message_id:
+                    await ntf.edit_photo_caption(
+                        bot,
+                        chat_id=int(insp.picker_return_chat_id),
+                        message_id=int(insp.picker_return_message_id),
+                        caption=text,
+                        reply_markup=None,
+                    )
+            else:
+                await ntf.edit_photo_caption(
+                    bot,
+                    chat_id=callback.message.chat.id,
+                    message_id=callback.message.message_id,
+                    caption=text,
+                    reply_markup=None,
+                )
+                if insp.review_chat_id and insp.review_group_message_id:
+                    if (
+                        int(insp.review_chat_id) != callback.message.chat.id
+                        or int(insp.review_group_message_id) != callback.message.message_id
+                    ):
+                        await ntf.edit_photo_caption(
+                            bot,
+                            chat_id=int(insp.review_chat_id),
+                            message_id=int(insp.review_group_message_id),
+                            caption=text,
+                            reply_markup=None,
+                        )
+
+            picker_tg = await svc.picker_telegram_id(session, insp)
+            await _notify_picker(
+                bot,
+                picker_tg,
+                f"✅ Tekshiruvchi tasdiqladi.\n📄 Faktura: <b>{insp.invoice_number}</b>",
+            )
+            await session.commit()
         await callback.answer("Tasdiqlandi ✅")
     except Exception:
         log.exception("fix:ok failed insp=%s", insp_id)
@@ -500,6 +694,7 @@ async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
 
 @router.callback_query(F.data.startswith("fix:bad:"))
 async def cb_fix_bad(callback: CallbackQuery, bot: Bot) -> None:
+    st = _settings()
     insp_id = int(callback.data.split(":")[-1])
     try:
         async with require_session_local()() as session:
@@ -517,23 +712,60 @@ async def cb_fix_bad(callback: CallbackQuery, bot: Bot) -> None:
                 return
             await session.refresh(insp)
             text = svc.returned_text(insp, err) + "\n\n👇 Qayta tuzatib tugmani bosing:"
-            await ntf.edit_photo_caption(
-                bot,
-                chat_id=callback.message.chat.id,
-                message_id=callback.message.message_id,
-                caption=text,
-                reply_markup=picker_fix_kb(insp.id),
-            )
-            picker_tg = await svc.picker_telegram_id(session, insp)
-            if picker_tg and picker_tg != callback.message.chat.id:
-                try:
-                    await bot.send_message(
+
+            if ntf.uses_group_workflow(st):
+                await ntf.edit_photo_caption(
+                    bot,
+                    chat_id=callback.message.chat.id,
+                    message_id=callback.message.message_id,
+                    caption=text + "\n\n<i>Teruvchiga qaytarildi</i>",
+                    reply_markup=None,
+                )
+                if insp.return_chat_id and insp.return_group_message_id:
+                    if (
+                        int(insp.return_chat_id) != callback.message.chat.id
+                        or int(insp.return_group_message_id) != callback.message.message_id
+                    ):
+                        await ntf.edit_photo_caption(
+                            bot,
+                            chat_id=int(insp.return_chat_id),
+                            message_id=int(insp.return_group_message_id),
+                            caption=text,
+                            reply_markup=picker_fix_kb(insp.id),
+                        )
+                if insp.picker_return_chat_id and insp.picker_return_message_id:
+                    await ntf.edit_photo_caption(
+                        bot,
+                        chat_id=int(insp.picker_return_chat_id),
+                        message_id=int(insp.picker_return_message_id),
+                        caption=text,
+                        reply_markup=picker_fix_kb(insp.id),
+                    )
+                if insp.review_chat_id and insp.review_group_message_id:
+                    await ntf.edit_photo_caption(
+                        bot,
+                        chat_id=int(insp.review_chat_id),
+                        message_id=int(insp.review_group_message_id),
+                        caption=svc.group_error_sent_text(insp),
+                        reply_markup=None,
+                    )
+            else:
+                await ntf.edit_photo_caption(
+                    bot,
+                    chat_id=callback.message.chat.id,
+                    message_id=callback.message.message_id,
+                    caption=text,
+                    reply_markup=picker_fix_kb(insp.id),
+                )
+                picker_tg = await svc.picker_telegram_id(session, insp)
+                if picker_tg and picker_tg != callback.message.chat.id:
+                    await _notify_picker(
+                        bot,
                         picker_tg,
                         f"❌ Yana xato bor.\n📄 Faktura: {insp.invoice_number}\n"
                         "Qayta tuzating va tugmani bosing.",
                     )
-                except Exception:
-                    log.exception("picker reject notify failed")
+            await session.commit()
         await callback.answer("Teruvchi qayta tuzatadi")
     except Exception:
         log.exception("fix:bad failed insp=%s", insp_id)
