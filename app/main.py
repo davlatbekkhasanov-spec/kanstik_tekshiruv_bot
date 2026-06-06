@@ -73,7 +73,13 @@ async def main() -> None:
                 pass
         return True
 
-    await dp.start_polling(bot)
+    from app.services.pending_refresh import run_pending_refresh
+
+    refresh_task = asyncio.create_task(run_pending_refresh(bot))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        refresh_task.cancel()
 
 
 if __name__ == "__main__":

@@ -10,12 +10,13 @@ def picker_menu_kb() -> ReplyKeyboardMarkup:
     )
 
 
-def start_review_kb(inspection_id: int) -> InlineKeyboardMarkup:
+def start_review_kb(inspection_id: int, invoice: str = "") -> InlineKeyboardMarkup:
+    inv = f" #{invoice}" if invoice else ""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Qabul qilib tekshirishni boshlash",
+                    text=f"✅{inv} — Qabul qilib boshlash",
                     callback_data=f"rev:start:{inspection_id}",
                 )
             ]

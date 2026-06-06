@@ -159,7 +159,45 @@ async def return_inspection(
     return True
 
 
-def new_inspection_text(insp: Inspection) -> str:
+def _as_tz(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(_tz())
+    return dt.astimezone(_tz())
+
+
+def wait_minutes(insp: Inspection, until: datetime | None = None) -> int:
+    until = until or datetime.now(_tz())
+    sec = int((until - _as_tz(insp.created_at)).total_seconds())
+    return max(0, sec // 60)
+
+
+def wait_label(insp: Inspection, until: datetime | None = None) -> str:
+    until = until or datetime.now(_tz())
+    return fmt_duration(_as_tz(insp.created_at), until)
+
+
+def wait_flag(minutes: int) -> str:
+    if minutes >= 10:
+        return "🔴"
+    if minutes >= 5:
+        return "⚠️"
+    return "⏳"
+
+
+async def list_pending(session: AsyncSession) -> list[Inspection]:
+    rows = await session.scalars(
+        select(Inspection)
+        .where(Inspection.status == InspectionStatus.pending)
+        .order_by(Inspection.created_at.asc())
+    )
+    return list(rows.all())
+
+
+def pending_inspection_text(insp: Inspection, *, now: datetime | None = None) -> str:
+    now = now or datetime.now(_tz())
+    mins = wait_minutes(insp, now)
+    flag = wait_flag(mins)
+    wait = wait_label(insp, now)
     return (
         "📦 <b>YANGI TEKSHIRUV</b>\n"
         "<i>Tekshiruvchi — qabul qiling va tekshiring</i>\n\n"
@@ -167,38 +205,50 @@ def new_inspection_text(insp: Inspection) -> str:
         f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
         f"👤 Yuborgan teruvchi: <b>{insp.picker_name}</b>\n"
         f"🔍 Tekshiruvchi: <b>kutilmoqda</b>\n"
-        f"🕒 Yuborilgan vaqt: <b>{fmt_dt(insp.created_at)}</b>"
+        f"{flag} <b>Kutilmoqda: {wait}</b>\n"
+        f"🕒 Yuborilgan: <b>{fmt_dt(insp.created_at)}</b>"
     )
 
 
+def new_inspection_text(insp: Inspection) -> str:
+    return pending_inspection_text(insp)
+
+
 def in_review_text(insp: Inspection) -> str:
+    wait = wait_label(insp, insp.review_started_at)
     return (
         "🔍 <b>TEKSHIRUV BOSHLANDI</b>\n\n"
         f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
         f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
         f"🔍 Tekshiruvchi: <b>{insp.reviewer_name}</b>\n"
-        f"🕒 Boshlangan vaqt: <b>{fmt_dt(insp.review_started_at)}</b>"
+        f"⏳ Kutish vaqti: <b>{wait}</b>\n"
+        f"🕒 Boshlangan: <b>{fmt_dt(insp.review_started_at)}</b>"
     )
 
 
 def approved_text(insp: Inspection) -> str:
+    wait = wait_label(insp, insp.review_started_at)
     return (
         "✅ <b>TASDIQLANDI</b>\n\n"
         f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
         f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
         f"🔍 Tekshiruvchi: <b>{insp.reviewer_name}</b>\n"
-        f"⏱ Tekshiruv vaqti: <b>{fmt_duration(insp.review_started_at, insp.review_finished_at)}</b>\n"
+        f"⏳ Kutish: <b>{wait}</b>\n"
+        f"⏱ Tekshiruv: <b>{fmt_duration(insp.review_started_at, insp.review_finished_at)}</b>\n"
         f"📌 Natija: <b>Xatosiz</b>"
     )
 
 
 def returned_text(insp: Inspection, err: InspectionError) -> str:
+    wait = wait_label(insp, insp.review_started_at)
     return (
         "🚨 <b>QAYTA TERISH KERAK</b>\n\n"
         f"ID: <b>#{insp.id}</b>\n"
         f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
         f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
-        f"🔍 Tekshiruvchi: <b>{insp.reviewer_name}</b>\n\n"
+        f"🔍 Tekshiruvchi: <b>{insp.reviewer_name}</b>\n"
+        f"⏳ Kutish: <b>{wait}</b>\n"
+        f"⏱ Tekshiruv: <b>{fmt_duration(insp.review_started_at, insp.review_finished_at)}</b>\n\n"
         f"❌ Xato turi:\n<b>{ERROR_TYPE_LABELS[err.error_type]}</b>\n\n"
         f"📝 Izoh:\n{err.error_comment}"
     )

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     tz: str = "Asia/Tashkent"
     daily_report_hour: int = 18
     daily_report_minute: int = 0
+    pending_refresh_seconds: int = 60
 
     @model_validator(mode="before")
     @classmethod

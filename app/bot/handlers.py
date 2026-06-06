@@ -111,13 +111,13 @@ async def picker_photo(message: Message, state: FSMContext, bot: Bot) -> None:
             picker=user,
             cargo_photo_file_id=photo.file_id,
         )
-        text = svc.new_inspection_text(insp)
+        text = svc.pending_inspection_text(insp)
         sent = await ntf.send_photo_notice(
             bot,
             chat_ids=ntf.review_target_chats(st),
             photo_file_id=photo.file_id,
             caption=text,
-            reply_markup=start_review_kb(insp.id),
+            reply_markup=start_review_kb(insp.id, insp.invoice_number),
         )
         if sent:
             insp.review_chat_id, insp.review_group_message_id = sent
@@ -127,8 +127,8 @@ async def picker_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     dest = "tekshiruvchi lichkasiga" if ntf.uses_private_notify(st) else "tekshiruv guruhiga"
     await message.answer(
         f"✅ Tekshiruvchi ga yuborildi ({dest}).\n"
-        f"ID: #{insp.id}\n\n"
-        "Tekshiruvchi qabul qilib tekshirishni boshlaydi — natijani kuting.",
+        f"ID: #{insp.id} | Faktura: {insp.invoice_number}\n\n"
+        "⏳ Kutilmoqda: 0 daqiqa — tekshiruvchi qabul qilganda xabar olasiz.",
         reply_markup=picker_menu_kb(),
     )
 
@@ -188,7 +188,20 @@ async def cb_start_review(callback: CallbackQuery, bot: Bot) -> None:
             reply_markup=review_actions_kb(insp.id),
         ):
             await ntf.send_text_notice(bot, chat_ids=[chat_id], text=text)
-    await callback.answer("Tekshiruv boshlandi")
+        wait = svc.wait_label(insp, insp.review_started_at)
+        picker_tg = await svc.picker_telegram_id(session, insp)
+        if picker_tg:
+            try:
+                await bot.send_message(
+                    picker_tg,
+                    f"🔍 Tekshiruvchi qabul qildi.\n"
+                    f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+                    f"⏳ Kutish vaqti: <b>{wait}</b>",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log.exception("picker notify failed tg=%s", picker_tg)
+    await callback.answer(f"Qabul qilindi. Kutish: {wait}")
 
 
 @router.callback_query(F.data.startswith("rev:ok:"))
@@ -348,6 +361,30 @@ async def reviewer_error_photo(message: Message, state: FSMContext, bot: Bot) ->
 @router.message(ReviewerStates.error_photo)
 async def reviewer_photo_required(message: Message) -> None:
     await message.answer("Xato rasmini yuboring (foto).")
+
+
+@router.message(Command("navbat"))
+async def cmd_navbat(message: Message) -> None:
+    if SessionLocal is None:
+        await message.answer("Baza tayyor emas.")
+        return
+    async with require_session_local()() as session:
+        pending = await svc.list_pending(session)
+    if not pending:
+        await message.answer("📋 Navbat bo'sh — kutilayotgan tekshiruv yo'q ✅")
+        return
+    lines = ["📋 <b>Kutilayotgan tekshiruvlar</b> (eng eskisi birinchi):\n"]
+    for i, insp in enumerate(pending[:15], 1):
+        mins = svc.wait_minutes(insp)
+        flag = svc.wait_flag(mins)
+        wait = svc.wait_label(insp)
+        lines.append(
+            f"{flag} {i}. #{insp.id} faktura <b>{insp.invoice_number}</b> — "
+            f"{wait} ({insp.picker_name})"
+        )
+    if len(pending) > 15:
+        lines.append(f"\n... yana {len(pending) - 15} ta")
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 @router.message(Command("daily"))
