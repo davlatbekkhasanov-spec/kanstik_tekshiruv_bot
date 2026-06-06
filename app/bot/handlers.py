@@ -234,17 +234,29 @@ async def cb_error_type(callback: CallbackQuery, state: FSMContext) -> None:
     _, _, insp_id, err_val = callback.data.split(":", 3)
     await state.set_state(ReviewerStates.error_comment)
     await state.update_data(inspection_id=int(insp_id), error_type=err_val)
-    await callback.message.answer("📝 Xato haqida qisqa izoh yozing:")
+    await callback.message.answer(
+        "📝 Xato haqida qisqa izoh yozing yoki 🎤 ovozli xabar yuboring:"
+    )
     await callback.answer()
+
+
+@router.message(ReviewerStates.error_comment, F.voice)
+async def reviewer_comment_voice(message: Message, state: FSMContext) -> None:
+    await state.update_data(
+        error_comment="🎤 Ovozli izoh",
+        error_voice_file_id=message.voice.file_id,
+    )
+    await state.set_state(ReviewerStates.error_photo)
+    await message.answer("📸 Xato rasmini yuboring:")
 
 
 @router.message(ReviewerStates.error_comment)
 async def reviewer_comment(message: Message, state: FSMContext) -> None:
     comment = (message.text or "").strip()
     if not comment:
-        await message.answer("Izoh yozing.")
+        await message.answer("Izoh yozing yoki ovozli xabar yuboring.")
         return
-    await state.update_data(error_comment=comment)
+    await state.update_data(error_comment=comment, error_voice_file_id=None)
     await state.set_state(ReviewerStates.error_photo)
     await message.answer("📸 Xato rasmini yuboring:")
 
@@ -257,67 +269,80 @@ async def reviewer_error_photo(message: Message, state: FSMContext, bot: Bot) ->
     insp_id = int(data["inspection_id"])
     err_type = ErrorType(data["error_type"])
 
-    async with require_session_local()() as session:
-        insp = await svc.get_inspection(session, insp_id)
-        if not insp:
-            await message.answer("Inspection topilmadi.")
-            await state.clear()
-            return
-        if not insp.reviewer_id:
-            user = await svc.get_or_create_user(
+    try:
+        async with require_session_local()() as session:
+            insp = await svc.get_inspection(session, insp_id)
+            if not insp:
+                await message.answer("Inspection topilmadi.")
+                await state.clear()
+                return
+            ok = await svc.return_inspection(
                 session,
-                telegram_id=message.from_user.id,
-                full_name=message.from_user.full_name or "",
-                admin_ids=st.admin_id_set(),
+                insp,
+                error_type=err_type,
+                error_comment=data["error_comment"],
+                error_photo_file_id=photo.file_id,
             )
-            insp.reviewer_id = user.id
-            insp.reviewer_name = user.full_name
-        ok = await svc.return_inspection(
-            session,
-            insp,
-            error_type=err_type,
-            error_comment=data["error_comment"],
-            error_photo_file_id=photo.file_id,
-        )
-        if not ok:
-            await message.answer("Holat mos emas.")
-            await state.clear()
-            return
-        await session.refresh(insp)
-        err = insp.error
-        text = svc.returned_text(insp, err)
-        ret_chats = ntf.return_target_chats(st)
-        ret = await ntf.send_photo_notice(
-            bot,
-            chat_ids=ret_chats,
-            photo_file_id=photo.file_id,
-            caption=text,
-        )
-        await ntf.send_photo_notice(
-            bot,
-            chat_ids=ret_chats,
-            photo_file_id=insp.cargo_photo_file_id,
-            caption="📸 Dastlabki yuk rasmi",
-        )
-        if ret:
-            insp.return_group_message_id = ret[1]
-        review_chat = insp.review_chat_id or message.chat.id
-        done_note = (
-            "Qayta terish guruhiga yuborildi."
-            if not ntf.uses_private_notify(st)
-            else "Admin lichkasiga yuborildi (test rejim)."
-        )
-        await ntf.edit_photo_caption(
-            bot,
-            chat_id=review_chat,
-            message_id=insp.review_group_message_id,
-            caption=text + f"\n\n<i>{done_note}</i>",
-            reply_markup=None,
-        )
-        await session.commit()
+            if not ok:
+                await message.answer("Holat mos emas. Avval tekshiruvni boshlang.")
+                await state.clear()
+                return
 
-    await state.clear()
-    await message.answer("✅ Xato qayd etildi.")
+            err = await svc.get_inspection_error(session, insp_id)
+            if not err:
+                await message.answer("Xato saqlanmadi. Qayta urinib ko‘ring.")
+                await state.clear()
+                return
+
+            await session.refresh(insp)
+            text = svc.returned_text(insp, err)
+            ret_chats = ntf.return_target_chats(st)
+            ret = await ntf.send_photo_notice(
+                bot,
+                chat_ids=ret_chats,
+                photo_file_id=photo.file_id,
+                caption=text,
+            )
+            voice_id = data.get("error_voice_file_id")
+            if voice_id:
+                await ntf.send_voice_notice(
+                    bot,
+                    chat_ids=ret_chats,
+                    voice_file_id=voice_id,
+                    caption="📝 Izoh (ovoz)",
+                )
+            await ntf.send_photo_notice(
+                bot,
+                chat_ids=ret_chats,
+                photo_file_id=insp.cargo_photo_file_id,
+                caption="📸 Dastlabki yuk rasmi",
+            )
+            if ret:
+                insp.return_group_message_id = ret[1]
+            review_chat = insp.review_chat_id or message.chat.id
+            done_note = (
+                "Qayta terish guruhiga yuborildi."
+                if not ntf.uses_private_notify(st)
+                else "Admin lichkasiga yuborildi (test rejim)."
+            )
+            if not await ntf.edit_photo_caption(
+                bot,
+                chat_id=review_chat,
+                message_id=insp.review_group_message_id,
+                caption=text + f"\n\n<i>{done_note}</i>",
+                reply_markup=None,
+            ):
+                await ntf.send_text_notice(bot, chat_ids=[review_chat], text=text)
+            await session.commit()
+
+        await state.clear()
+        await message.answer("✅ Xato qayd etildi.")
+    except Exception:
+        log.exception("reviewer_error_photo failed insp=%s", insp_id)
+        await message.answer(
+            "⚠️ Xato saqlanmadi. Qayta urinib ko‘ring yoki admin bilan bog‘laning."
+        )
+        await state.clear()
 
 
 @router.message(ReviewerStates.error_photo)

@@ -84,6 +84,12 @@ async def get_inspection(session: AsyncSession, inspection_id: int) -> Inspectio
     )
 
 
+async def get_inspection_error(session: AsyncSession, inspection_id: int) -> InspectionError | None:
+    return await session.scalar(
+        select(InspectionError).where(InspectionError.inspection_id == inspection_id)
+    )
+
+
 async def picker_telegram_id(session: AsyncSession, inspection: Inspection) -> int | None:
     picker = await session.get(User, inspection.picker_id)
     return picker.telegram_id if picker else None

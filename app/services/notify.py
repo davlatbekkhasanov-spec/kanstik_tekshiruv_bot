@@ -99,3 +99,17 @@ async def send_text_notice(
             await bot.send_message(cid, text[:4096], parse_mode="HTML")
         except Exception:
             log.exception("send_message chat_id=%s", cid)
+
+
+async def send_voice_notice(
+    bot: Bot,
+    *,
+    chat_ids: list[int],
+    voice_file_id: str,
+    caption: str | None = None,
+) -> None:
+    for cid in chat_ids:
+        try:
+            await bot.send_voice(cid, voice_file_id, caption=caption)
+        except Exception:
+            log.exception("send_voice chat_id=%s", cid)
