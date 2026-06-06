@@ -234,14 +234,19 @@ def pending_inspection_text(insp: Inspection, *, now: datetime | None = None) ->
     mins = wait_minutes(insp, now)
     flag = wait_flag(mins)
     wait = wait_label(insp, now)
+    urgency = ""
+    if mins >= 10:
+        urgency = "\n🔴 <i>10+ daqiqa — tezroq qabul qiling!</i>"
+    elif mins >= 5:
+        urgency = "\n⚠️ <i>5+ daqiqa — navbatda turibdi</i>"
     return (
         "📦 <b>YANGI TEKSHIRUV</b>\n"
-        "<i>Tekshiruvchi — qabul qiling va tekshiring</i>\n\n"
-        f"ID: <b>#{insp.id}</b>\n"
+        "━━━━━━━━━━━━━━━━\n"
+        "<i>✋ Qabul qilib tekshirishni boshlang</i>\n\n"
+        f"🆔 <b>#{insp.id}</b>\n"
         f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
-        f"👤 Yuborgan teruvchi: <b>{insp.picker_name}</b>\n"
-        f"🔍 Tekshiruvchi: <b>kutilmoqda</b>\n"
-        f"{flag} <b>Kutilmoqda: {wait}</b>\n"
+        f"👤 Teruvchi: <b>{insp.picker_name}</b>\n\n"
+        f"{flag} Navbat: <b>{wait}</b>{urgency}\n"
         f"🕒 Yuborilgan: <b>{fmt_dt(insp.created_at)}</b>"
     )
 
