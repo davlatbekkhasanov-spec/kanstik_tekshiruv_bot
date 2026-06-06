@@ -134,6 +134,41 @@ async def approve_inspection(session: AsyncSession, inspection: Inspection) -> b
     return True
 
 
+async def reviewer_telegram_id(session: AsyncSession, inspection: Inspection) -> int | None:
+    if not inspection.reviewer_id:
+        return None
+    user = await session.get(User, inspection.reviewer_id)
+    return user.telegram_id if user else None
+
+
+async def submit_fix(session: AsyncSession, inspection: Inspection) -> bool:
+    if inspection.status != InspectionStatus.returned:
+        return False
+    inspection.status = InspectionStatus.fix_submitted
+    inspection.fix_submitted_at = datetime.now(_tz())
+    await session.commit()
+    return True
+
+
+async def confirm_fix(session: AsyncSession, inspection: Inspection) -> bool:
+    if inspection.status != InspectionStatus.fix_submitted:
+        return False
+    inspection.status = InspectionStatus.approved
+    inspection.result = InspectionResult.correct
+    inspection.review_finished_at = datetime.now(_tz())
+    await session.commit()
+    return True
+
+
+async def reopen_after_fix(session: AsyncSession, inspection: Inspection) -> bool:
+    if inspection.status != InspectionStatus.fix_submitted:
+        return False
+    inspection.status = InspectionStatus.in_review
+    inspection.fix_submitted_at = None
+    await session.commit()
+    return True
+
+
 async def return_inspection(
     session: AsyncSession,
     inspection: Inspection,
@@ -251,6 +286,37 @@ def returned_text(insp: Inspection, err: InspectionError) -> str:
         f"⏱ Tekshiruv: <b>{fmt_duration(insp.review_started_at, insp.review_finished_at)}</b>\n\n"
         f"❌ Xato turi:\n<b>{ERROR_TYPE_LABELS[err.error_type]}</b>\n\n"
         f"📝 Izoh:\n{err.error_comment}"
+    )
+
+
+def picker_fixed_pending_text(insp: Inspection) -> str:
+    return (
+        "⏳ <b>Tuzatildi — tekshiruvchi tasdig'i kutilmoqda</b>\n\n"
+        f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+        f"👤 Teruvchi: <b>{insp.picker_name}</b>"
+    )
+
+
+def fix_submitted_text(insp: Inspection) -> str:
+    return (
+        "✅ <b>XATOLIK BARTARAF ETILDI</b>\n\n"
+        "🔍 <b>Tekshiruvchi, iltimos tasdiqlang.</b>\n\n"
+        f"ID: <b>#{insp.id}</b>\n"
+        f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+        f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
+        f"🔍 Tekshiruvchi: <b>{insp.reviewer_name or '—'}</b>"
+    )
+
+
+def fix_confirmed_text(insp: Inspection) -> str:
+    wait = wait_label(insp, insp.review_started_at)
+    return (
+        "✅ <b>TASDIQLANDI</b> (xato tuzatildi)\n\n"
+        f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+        f"👤 Teruvchi: <b>{insp.picker_name}</b>\n"
+        f"🔍 Tekshiruvchi: <b>{insp.reviewer_name}</b>\n"
+        f"⏳ Kutish: <b>{wait}</b>\n"
+        f"📌 Natija: <b>Xato tuzatildi va tasdiqlandi</b>"
     )
 
 

@@ -8,7 +8,14 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from app.bot.keyboards import error_types_kb, picker_menu_kb, review_actions_kb, start_review_kb
+from app.bot.keyboards import (
+    error_types_kb,
+    picker_fix_kb,
+    picker_menu_kb,
+    review_actions_kb,
+    reviewer_confirm_fix_kb,
+    start_review_kb,
+)
 from app.bot.states import PickerStates, ReviewerStates
 from app.config import get_settings
 from app.constants import ErrorType, UserRole
@@ -295,6 +302,7 @@ async def _finalize_return(
                 chat_ids=ret_chats,
                 photo_file_id=insp.cargo_photo_file_id,
                 caption=text,
+                reply_markup=picker_fix_kb(insp.id),
             )
             voice_id = data.get("error_voice_file_id")
             if voice_id:
@@ -306,6 +314,16 @@ async def _finalize_return(
                 )
             if ret:
                 insp.return_group_message_id = ret[1]
+                insp.return_chat_id = ret[0]
+            picker_tg = await svc.picker_telegram_id(session, insp)
+            if picker_tg:
+                await ntf.send_photo_notice(
+                    bot,
+                    chat_ids=[picker_tg],
+                    photo_file_id=insp.cargo_photo_file_id,
+                    caption=text + "\n\n👇 Tuzatgach tugmani bosing:",
+                    reply_markup=picker_fix_kb(insp.id),
+                )
             review_chat = insp.review_chat_id or message.chat.id
             done_note = (
                 "Teruvchi guruhiga yuborildi."
@@ -350,6 +368,122 @@ async def reviewer_comment(message: Message, state: FSMContext, bot: Bot) -> Non
     data["error_comment"] = comment
     data["error_voice_file_id"] = None
     await _finalize_return(message, state, bot, data)
+
+
+@router.callback_query(F.data.startswith("fix:done:"))
+async def cb_fix_done(callback: CallbackQuery, bot: Bot) -> None:
+    st = _settings()
+    insp_id = int(callback.data.split(":")[-1])
+    async with require_session_local()() as session:
+        insp = await svc.get_inspection(session, insp_id)
+        if not insp:
+            await callback.answer("Topilmadi", show_alert=True)
+            return
+        picker_tg = await svc.picker_telegram_id(session, insp)
+        if picker_tg != callback.from_user.id and callback.from_user.id not in st.admin_id_set():
+            await callback.answer("Faqat teruvchi tuzatganini belgilaydi", show_alert=True)
+            return
+        ok = await svc.submit_fix(session, insp)
+        if not ok:
+            await callback.answer("Allaqachon yuborilgan yoki holat mos emas", show_alert=True)
+            return
+        await session.refresh(insp)
+        confirm_text = svc.fix_submitted_text(insp)
+        reviewer_tg = await svc.reviewer_telegram_id(session, insp)
+        notify_ids: set[int] = set(ntf.review_target_chats(st))
+        if reviewer_tg:
+            notify_ids.add(reviewer_tg)
+        await ntf.send_photo_notice(
+            bot,
+            chat_ids=sorted(notify_ids),
+            photo_file_id=insp.cargo_photo_file_id,
+            caption=confirm_text,
+            reply_markup=reviewer_confirm_fix_kb(insp.id),
+        )
+        if insp.return_chat_id and insp.return_group_message_id:
+            await ntf.edit_photo_caption(
+                bot,
+                chat_id=int(insp.return_chat_id),
+                message_id=int(insp.return_group_message_id),
+                caption=svc.picker_fixed_pending_text(insp),
+                reply_markup=None,
+            )
+    await callback.answer("Tekshiruvchi ga yuborildi ✅")
+    await callback.message.answer(
+        "✅ Xato tuzatildi deb belgilandi.\nTekshiruvchi tasdig'ini kuting."
+    )
+
+
+@router.callback_query(F.data.startswith("fix:ok:"))
+async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
+    st = _settings()
+    insp_id = int(callback.data.split(":")[-1])
+    async with require_session_local()() as session:
+        insp = await svc.get_inspection(session, insp_id)
+        if not insp:
+            await callback.answer("Topilmadi", show_alert=True)
+            return
+        ok = await svc.confirm_fix(session, insp)
+        if not ok:
+            await callback.answer("Holat mos emas", show_alert=True)
+            return
+        await session.refresh(insp)
+        text = svc.fix_confirmed_text(insp)
+        chat_id = insp.review_chat_id or callback.message.chat.id
+        if insp.review_group_message_id:
+            await ntf.edit_photo_caption(
+                bot,
+                chat_id=int(chat_id),
+                message_id=int(insp.review_group_message_id),
+                caption=text,
+                reply_markup=None,
+            )
+        picker_tg = await svc.picker_telegram_id(session, insp)
+        if picker_tg:
+            try:
+                await bot.send_message(
+                    picker_tg,
+                    f"✅ Tekshiruvchi tasdiqladi.\n📄 Faktura: <b>{insp.invoice_number}</b>",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                log.exception("picker confirm notify failed")
+    await callback.answer("Tasdiqlandi ✅")
+
+
+@router.callback_query(F.data.startswith("fix:bad:"))
+async def cb_fix_bad(callback: CallbackQuery, bot: Bot) -> None:
+    insp_id = int(callback.data.split(":")[-1])
+    async with require_session_local()() as session:
+        insp = await svc.get_inspection(session, insp_id)
+        if not insp:
+            await callback.answer("Topilmadi", show_alert=True)
+            return
+        ok = await svc.reopen_after_fix(session, insp)
+        if not ok:
+            await callback.answer("Holat mos emas", show_alert=True)
+            return
+        await session.refresh(insp)
+        text = svc.in_review_text(insp)
+        chat_id = insp.review_chat_id or callback.message.chat.id
+        msg_id = insp.review_group_message_id or callback.message.message_id
+        await ntf.edit_photo_caption(
+            bot,
+            chat_id=int(chat_id),
+            message_id=int(msg_id),
+            caption=text,
+            reply_markup=review_actions_kb(insp.id),
+        )
+        picker_tg = await svc.picker_telegram_id(session, insp)
+        if picker_tg:
+            try:
+                await bot.send_message(
+                    picker_tg,
+                    f"❌ Tekshiruvchi yana xato topdi.\n📄 Faktura: {insp.invoice_number}\nQayta tuzating.",
+                )
+            except Exception:
+                log.exception("picker reopen notify failed")
+    await callback.answer("Qayta tekshiruv")
 
 
 @router.message(Command("navbat"))

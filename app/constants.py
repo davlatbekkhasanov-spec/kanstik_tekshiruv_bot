@@ -12,6 +12,7 @@ class InspectionStatus(str, enum.Enum):
     in_review = "in_review"
     approved = "approved"
     returned = "returned"
+    fix_submitted = "fix_submitted"
 
 
 class InspectionResult(str, enum.Enum):

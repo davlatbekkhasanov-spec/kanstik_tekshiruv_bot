@@ -47,3 +47,33 @@ def error_types_kb(inspection_id: int) -> InlineKeyboardMarkup:
             ]
         )
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def picker_fix_kb(inspection_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Xatoni tuzatdim",
+                    callback_data=f"fix:done:{inspection_id}",
+                )
+            ]
+        ]
+    )
+
+
+def reviewer_confirm_fix_kb(inspection_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Tasdiqlash",
+                    callback_data=f"fix:ok:{inspection_id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Yana xato",
+                    callback_data=f"fix:bad:{inspection_id}",
+                ),
+            ]
+        ]
+    )
