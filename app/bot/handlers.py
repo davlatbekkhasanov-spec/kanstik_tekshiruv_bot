@@ -105,39 +105,48 @@ async def picker_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     st = _settings()
     data = await state.get_data()
     photo = message.photo[-1]
-    async with require_session_local()() as session:
-        user = await svc.get_or_create_user(
-            session,
-            telegram_id=message.from_user.id,
-            full_name=message.from_user.full_name or "",
-            admin_ids=st.admin_id_set(),
-        )
-        insp = await svc.create_inspection(
-            session,
-            invoice_number=data["invoice_number"],
-            picker=user,
-            cargo_photo_file_id=photo.file_id,
-        )
-        text = svc.pending_inspection_text(insp)
-        sent = await ntf.send_photo_notice(
-            bot,
-            chat_ids=ntf.review_target_chats(st),
-            photo_file_id=photo.file_id,
-            caption=text,
-            reply_markup=start_review_kb(insp.id, insp.invoice_number),
-        )
-        if sent:
-            insp.review_chat_id, insp.review_group_message_id = sent
-        await session.commit()
+    try:
+        async with require_session_local()() as session:
+            user = await svc.get_or_create_user(
+                session,
+                telegram_id=message.from_user.id,
+                full_name=message.from_user.full_name or "",
+                admin_ids=st.admin_id_set(),
+            )
+            insp = await svc.create_inspection(
+                session,
+                invoice_number=data["invoice_number"],
+                picker=user,
+                cargo_photo_file_id=photo.file_id,
+            )
+            text = svc.pending_inspection_text(insp)
+            sent = await ntf.send_photo_notice(
+                bot,
+                chat_ids=ntf.review_target_chats(st),
+                photo_file_id=photo.file_id,
+                caption=text,
+                reply_markup=start_review_kb(insp.id, insp.invoice_number),
+            )
+            if sent:
+                insp.review_chat_id, insp.review_group_message_id = sent
+            await session.commit()
 
-    await state.clear()
-    dest = "tekshiruvchi lichkasiga" if ntf.uses_private_notify(st) else "tekshiruv guruhiga"
-    await message.answer(
-        f"✅ Tekshiruvchi ga yuborildi ({dest}).\n"
-        f"ID: #{insp.id} | Faktura: {insp.invoice_number}\n\n"
-        "⏳ Kutilmoqda: 0 daqiqa — tekshiruvchi qabul qilganda xabar olasiz.",
-        reply_markup=picker_menu_kb(),
-    )
+        await state.clear()
+        dest = "tekshiruvchi lichkasiga" if ntf.uses_private_notify(st) else "tekshiruv guruhiga"
+        await message.answer(
+            f"✅ Tekshiruvchi ga yuborildi ({dest}).\n"
+            f"ID: #{insp.id} | Faktura: {insp.invoice_number}\n\n"
+            "⏳ Kutilmoqda — tekshiruvchi qabul qilganda xabar olasiz.",
+            reply_markup=picker_menu_kb(),
+        )
+    except Exception as exc:
+        log.exception("picker_photo failed user=%s", message.from_user.id)
+        await state.clear()
+        err = html.escape(str(exc).split("\n", maxsplit=1)[0][:180])
+        await message.answer(
+            f"⚠️ Yuk yuborilmadi.\n<code>{err}</code>\n\nQayta urinib ko‘ring.",
+            parse_mode="HTML",
+        )
 
 
 @router.message(PickerStates.cargo_photo)

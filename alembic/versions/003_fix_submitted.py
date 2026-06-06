@@ -14,7 +14,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TYPE inspection_status ADD VALUE IF NOT EXISTS 'fix_submitted'")
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE inspection_status ADD VALUE IF NOT EXISTS 'fix_submitted'")
     op.add_column("inspections", sa.Column("return_chat_id", sa.BigInteger(), nullable=True))
     op.add_column(
         "inspections",

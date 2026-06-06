@@ -72,6 +72,41 @@ async def setup_database() -> tuple[str, dict]:
     raise RuntimeError(f"Barcha DB urinishlari muvaffaqiyatsiz: {last_err}")
 
 
+def ensure_inspection_schema(url: str) -> None:
+    """Migration o'tmasa ham kerakli ustunlar va enum qo'shiladi."""
+    from sqlalchemy import inspect
+
+    sync = alembic_sync_url(url)
+    connect_args = _sync_connect_args or sync_connect_args(url)
+    engine = create_engine(sync, connect_args=connect_args)
+    try:
+        if not inspect(engine).has_table("inspections"):
+            return
+        cols = {c["name"] for c in inspect(engine).get_columns("inspections")}
+        with engine.begin() as conn:
+            if "return_chat_id" not in cols:
+                conn.execute(
+                    text("ALTER TABLE inspections ADD COLUMN return_chat_id BIGINT")
+                )
+                log.info("Added column inspections.return_chat_id")
+            if "fix_submitted_at" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE inspections ADD COLUMN fix_submitted_at "
+                        "TIMESTAMP WITH TIME ZONE"
+                    )
+                )
+                log.info("Added column inspections.fix_submitted_at")
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(
+                text(
+                    "ALTER TYPE inspection_status ADD VALUE IF NOT EXISTS 'fix_submitted'"
+                )
+            )
+    finally:
+        engine.dispose()
+
+
 def ensure_schema(url: str) -> None:
     """Jadvallar yo'q bo'lsa yaratadi (alembic muvaffaqiyatsiz bo'lsa)."""
     from sqlalchemy import inspect
@@ -107,9 +142,11 @@ def run_migrations(url: str) -> None:
             cfg = Config("alembic.ini")
             command.upgrade(cfg, "head")
             log.info("Alembic upgrade head OK")
+            ensure_inspection_schema(url)
             return
         except Exception as exc:
             last_err = exc
             log.warning("Migration try failed args=%s: %s", connect_args, exc)
-    log.error("Alembic failed, trying create_all: %s", last_err)
+    log.error("Alembic failed, trying schema repair: %s", last_err)
+    ensure_inspection_schema(url)
     ensure_schema(url)

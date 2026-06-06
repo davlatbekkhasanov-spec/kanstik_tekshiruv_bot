@@ -48,9 +48,22 @@ async def main() -> None:
         try:
             async with SessionLocal() as session:
                 await session.execute(text("SELECT 1"))
+                await session.execute(
+                    text(
+                        "SELECT return_chat_id, fix_submitted_at FROM inspections LIMIT 0"
+                    )
+                )
             log.info("Database connection OK")
         except Exception as exc:
             log.error("Database connection FAILED: %s", exc)
+            if db_url:
+                try:
+                    from app.db.bootstrap import ensure_inspection_schema
+
+                    ensure_inspection_schema(db_url)
+                    log.info("Schema repair attempted")
+                except Exception as repair_exc:
+                    log.error("Schema repair failed: %s", repair_exc)
 
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
