@@ -36,10 +36,12 @@ async def main() -> None:
     )
     me = await bot.get_me()
     log.info(
-        "Bot started: @%s id=%s setup_mode=%s admins=%s db=%s",
+        "Bot started: @%s id=%s setup_mode=%s review_group=%s return_group=%s admins=%s db=%s",
         me.username,
         me.id,
         settings.setup_mode,
+        settings.review_group_id or "—",
+        settings.return_group_id or "—",
         sorted(settings.admin_id_set()),
         bool(db_url),
     )

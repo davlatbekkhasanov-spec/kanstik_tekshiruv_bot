@@ -43,6 +43,28 @@ def _staff_denied(uid: int) -> str:
     )
 
 
+@router.message(Command("groupid"))
+async def cmd_groupid(message: Message) -> None:
+    if not _is_admin(message.from_user.id):
+        return
+    chat = message.chat
+    if chat.type not in ("group", "supergroup"):
+        await message.answer(
+            "Bu buyruq <b>guruh ichida</b> ishlatiladi.\n"
+            "Guruhga botni qo‘shing va u yerda /groupid yuboring.",
+            parse_mode="HTML",
+        )
+        return
+    await message.answer(
+        f"📋 Guruh: <b>{html.escape(chat.title or '—')}</b>\n"
+        f"🆔 ID: <code>{chat.id}</code>\n\n"
+        "Railway Variables:\n"
+        f"<code>REVIEW_GROUP_ID={chat.id}</code>\n"
+        f"<code>RETURN_GROUP_ID={chat.id}</code>",
+        parse_mode="HTML",
+    )
+
+
 @router.message(Command("myid"))
 async def cmd_myid(message: Message) -> None:
     uid = message.from_user.id
@@ -70,7 +92,13 @@ async def cmd_start(message: Message) -> None:
             extra = (
                 "\n\n🧪 <b>Test rejim</b> — tekshiruv xabarlari hozircha "
                 "<b>admin lichkasiga</b> ketadi (guruh emas).\n"
-                "Guruh tayyor bo‘lgach: <code>SETUP_MODE=0</code>"
+                "Guruhga yuborish: Railway da <code>REVIEW_GROUP_ID</code> qo‘ying."
+            )
+        elif ntf.uses_group_workflow(st):
+            extra = (
+                f"\n\n📡 <b>Guruh rejimi</b>\n"
+                f"Tekshiruv guruhi: <code>{st.review_group_id}</code>\n"
+                f"Teruvchi guruhi: <code>{st.return_group_id or st.review_group_id}</code>"
             )
 
         if SessionLocal is None:
@@ -133,6 +161,7 @@ async def picker_photo(message: Message, state: FSMContext, bot: Bot) -> None:
     st = _settings()
     data = await state.get_data()
     photo = message.photo[-1]
+    sent = None
     try:
         async with require_session_local()() as session:
             user = await svc.get_or_create_user(
@@ -160,6 +189,18 @@ async def picker_photo(message: Message, state: FSMContext, bot: Bot) -> None:
             await session.commit()
 
         await state.clear()
+        if not sent:
+            await message.answer(
+                "⚠️ <b>Guruhga yuborilmadi!</b>\n\n"
+                "Tekshiring:\n"
+                "1️⃣ Bot tekshiruv guruhiga qo‘shilganmi?\n"
+                "2️⃣ Railway: <code>REVIEW_GROUP_ID=-100…</code> to‘g‘rimi?\n"
+                "3️⃣ Guruhda <code>/groupid</code> yuboring — ID ni ko‘rasiz\n\n"
+                f"ID: #{insp.id} | Faktura: {insp.invoice_number} bazada saqlandi.",
+                parse_mode="HTML",
+                reply_markup=picker_menu_kb(),
+            )
+            return
         dest = "tekshiruv guruhiga" if ntf.uses_group_workflow(st) else (
             "tekshiruvchi lichkasiga" if ntf.uses_private_notify(st) else "tekshiruv guruhiga"
         )

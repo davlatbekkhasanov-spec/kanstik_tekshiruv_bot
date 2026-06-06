@@ -11,7 +11,9 @@ log = logging.getLogger(__name__)
 
 
 def uses_private_notify(settings: Settings) -> bool:
-    """Guruh sozlanmaguncha — barcha tekshiruv xabarlari admin lichkasiga."""
+    """Guruh ID bor bo'lsa — doim guruhga; aks holda test rejimida lichkaga."""
+    if settings.review_group_id:
+        return False
     return settings.setup_mode
 
 
@@ -92,8 +94,11 @@ async def send_photo_notice(
             )
             if first is None:
                 first = (cid, msg.message_id)
-        except Exception:
-            log.exception("send_photo chat_id=%s", cid)
+            log.info("send_photo OK chat_id=%s msg_id=%s", cid, msg.message_id)
+        except Exception as exc:
+            log.exception("send_photo FAILED chat_id=%s: %s", cid, exc)
+    if first is None and chat_ids:
+        log.error("send_photo: barcha chatlar muvaffaqiyatsiz targets=%s", chat_ids)
     return first
 
 
