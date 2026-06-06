@@ -20,6 +20,7 @@ from app.bot.states import PickerStates, ReviewerStates
 from app.config import get_settings
 from app.constants import ErrorType, UserRole
 from app.db.session import SessionLocal, require_session_local
+from app.employee_registry import is_team_member, operator_display_name
 from app.services import inspection as svc
 from app.services import notify as ntf
 
@@ -35,8 +36,29 @@ def _is_admin(uid: int) -> bool:
     return uid in _settings().admin_id_set()
 
 
+def _staff_denied(uid: int) -> str:
+    return (
+        "⛔ Bu bot faqat Kanstik jamoasi (10 kishi) uchun.\n"
+        f"Sizning ID: <code>{uid}</code>"
+    )
+
+
+@router.message(Command("myid"))
+async def cmd_myid(message: Message) -> None:
+    uid = message.from_user.id
+    name = operator_display_name(uid) if is_team_member(uid) else (message.from_user.full_name or "—")
+    await message.answer(
+        f"👤 {name}\n🆔 <code>{uid}</code>",
+        parse_mode="HTML",
+    )
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
+    uid = message.from_user.id
+    if not is_team_member(uid):
+        await message.answer(_staff_denied(uid), parse_mode="HTML")
+        return
     welcome = (
         "Kanstik tekshiruv botiga xush kelibsiz.\n\n"
         "Teruvchi sifatida yukni tekshiruvga yuborish uchun tugmani bosing."
@@ -84,6 +106,9 @@ async def cmd_start(message: Message) -> None:
 @router.message(F.text == "📦 Tekshiruvga yuborish")
 async def picker_start(message: Message, state: FSMContext) -> None:
     if message.chat.type != "private":
+        return
+    if not is_team_member(message.from_user.id):
+        await message.answer(_staff_denied(message.from_user.id), parse_mode="HTML")
         return
     await state.set_state(PickerStates.invoice)
     await message.answer("📄 Faktura raqamini kiriting:")

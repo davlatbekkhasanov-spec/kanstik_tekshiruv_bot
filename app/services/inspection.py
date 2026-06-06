@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.constants import ERROR_TYPE_LABELS, ErrorType, InspectionResult, InspectionStatus, UserRole
 from app.db.models import Inspection, InspectionError, User
+from app.employee_registry import resolve_user_name
 
 
 def _tz() -> ZoneInfo:
@@ -44,14 +45,15 @@ async def get_or_create_user(
     admin_ids: set[int],
 ) -> User:
     role = UserRole.admin if telegram_id in admin_ids else UserRole.picker
+    display_name = resolve_user_name(telegram_id, full_name)
     row = await session.scalar(select(User).where(User.telegram_id == telegram_id))
     if row:
-        row.full_name = full_name or row.full_name
+        row.full_name = display_name
         if telegram_id in admin_ids:
             row.role = UserRole.admin
         await session.commit()
         return row
-    user = User(telegram_id=telegram_id, full_name=full_name or str(telegram_id), role=role)
+    user = User(telegram_id=telegram_id, full_name=display_name, role=role)
     session.add(user)
     await session.commit()
     await session.refresh(user)
