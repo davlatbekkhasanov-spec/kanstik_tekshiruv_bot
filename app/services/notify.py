@@ -31,6 +31,16 @@ def return_target_chats(settings: Settings) -> list[int]:
     return sorted(settings.admin_id_set())
 
 
+def unique_chat_ids(chats: list[int]) -> list[int]:
+    seen: set[int] = set()
+    out: list[int] = []
+    for cid in chats:
+        if cid and cid not in seen:
+            seen.add(cid)
+            out.append(cid)
+    return out
+
+
 async def send_photo_notice(
     bot: Bot,
     *,

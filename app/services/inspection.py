@@ -160,10 +160,11 @@ async def confirm_fix(session: AsyncSession, inspection: Inspection) -> bool:
     return True
 
 
-async def reopen_after_fix(session: AsyncSession, inspection: Inspection) -> bool:
+async def reject_fix_submission(session: AsyncSession, inspection: Inspection) -> bool:
+    """Tekshiruvchi tuzatishni rad etdi — teruvchi qayta tuzatadi."""
     if inspection.status != InspectionStatus.fix_submitted:
         return False
-    inspection.status = InspectionStatus.in_review
+    inspection.status = InspectionStatus.returned
     inspection.fix_submitted_at = None
     await session.commit()
     return True
