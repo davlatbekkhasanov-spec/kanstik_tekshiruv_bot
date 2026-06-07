@@ -6,7 +6,7 @@ import logging
 from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.bot.keyboards import (
     error_types_kb,
@@ -41,6 +41,38 @@ def _staff_denied(uid: int) -> str:
         "⛔ Bu bot faqat Kanstik jamoasi uchun.\n"
         f"Sizning ID: <code>{uid}</code>"
     )
+
+
+def _msg_key(chat_id: int | None, message_id: int | None) -> tuple[int, int] | None:
+    if chat_id and message_id:
+        return (int(chat_id), int(message_id))
+    return None
+
+
+async def _can_confirm_fix(session, insp, uid: int, admin_ids: set[int]) -> bool:
+    reviewer_tg = await svc.reviewer_telegram_id(session, insp)
+    if uid in admin_ids:
+        return True
+    return bool(reviewer_tg and reviewer_tg == uid)
+
+
+async def _apply_group_edits(
+    bot: Bot,
+    edits: list[tuple[tuple[int, int] | None, str, InlineKeyboardMarkup | None]],
+) -> None:
+    """Har bir (chat_id, message_id) faqat bir marta tahrirlanadi."""
+    seen: set[tuple[int, int]] = set()
+    for key, caption, reply_markup in edits:
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        await ntf.edit_photo_caption(
+            bot,
+            chat_id=key[0],
+            message_id=key[1],
+            caption=caption,
+            reply_markup=reply_markup,
+        )
 
 
 @router.message(Command("botconfig"))
@@ -719,6 +751,18 @@ async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
             if not insp:
                 await callback.answer("Topilmadi", show_alert=True)
                 return
+            if not await _can_confirm_fix(
+                session, insp, callback.from_user.id, st.admin_id_set()
+            ):
+                await callback.answer("Faqat tekshiruvchi tasdiqlaydi", show_alert=True)
+                return
+            if (
+                ntf.uses_group_workflow(st)
+                and insp.confirm_message_id
+                and callback.message.message_id != int(insp.confirm_message_id)
+            ):
+                await callback.answer("Eski xabar — yangisidan tasdiqlang", show_alert=True)
+                return
             ok = await svc.confirm_fix(session, insp)
             if not ok:
                 await callback.answer("Holat mos emas", show_alert=True)
@@ -727,38 +771,28 @@ async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
             full_text = svc.fix_confirmed_text(insp)
 
             if ntf.uses_group_workflow(st):
-                targets: list[tuple[int, int, str]] = [
-                    (
-                        callback.message.chat.id,
-                        callback.message.message_id,
-                        full_text,
-                    ),
-                ]
-                if insp.review_chat_id and insp.review_group_message_id:
-                    targets.append(
+                confirm_k = _msg_key(callback.message.chat.id, callback.message.message_id)
+                await _apply_group_edits(
+                    bot,
+                    [
+                        (confirm_k, full_text, None),
                         (
-                            int(insp.review_chat_id),
-                            int(insp.review_group_message_id),
+                            _msg_key(insp.review_chat_id, insp.review_group_message_id),
                             svc.group_nav_done_text(insp, via_fix=True),
-                        )
-                    )
-                if insp.return_chat_id and insp.return_group_message_id:
-                    targets.append(
+                            None,
+                        ),
                         (
-                            int(insp.return_chat_id),
-                            int(insp.return_group_message_id),
+                            _msg_key(insp.return_chat_id, insp.return_group_message_id),
                             svc.group_error_fixed_text(insp),
-                        )
-                    )
-                await ntf.edit_unique_captions(bot, targets=targets)
-                if insp.picker_return_chat_id and insp.picker_return_message_id:
-                    await ntf.edit_photo_caption(
-                        bot,
-                        chat_id=int(insp.picker_return_chat_id),
-                        message_id=int(insp.picker_return_message_id),
-                        caption=full_text,
-                        reply_markup=None,
-                    )
+                            None,
+                        ),
+                        (
+                            _msg_key(insp.picker_return_chat_id, insp.picker_return_message_id),
+                            full_text,
+                            None,
+                        ),
+                    ],
+                )
             else:
                 await ntf.edit_photo_caption(
                     bot,
@@ -786,6 +820,8 @@ async def cb_fix_ok(callback: CallbackQuery, bot: Bot) -> None:
                 picker_tg,
                 f"✅ Tekshiruvchi tasdiqladi.\n📄 Faktura: <b>{insp.invoice_number}</b>",
             )
+            insp.confirm_message_id = None
+            insp.confirm_chat_id = None
             await session.commit()
         await callback.answer("Tasdiqlandi ✅")
     except Exception:
@@ -803,6 +839,18 @@ async def cb_fix_bad(callback: CallbackQuery, bot: Bot) -> None:
             if not insp:
                 await callback.answer("Topilmadi", show_alert=True)
                 return
+            if not await _can_confirm_fix(
+                session, insp, callback.from_user.id, st.admin_id_set()
+            ):
+                await callback.answer("Faqat tekshiruvchi tasdiqlaydi", show_alert=True)
+                return
+            if (
+                ntf.uses_group_workflow(st)
+                and insp.confirm_message_id
+                and callback.message.message_id != int(insp.confirm_message_id)
+            ):
+                await callback.answer("Eski xabar — yangisidan javob bering", show_alert=True)
+                return
             ok = await svc.reject_fix_submission(session, insp)
             if not ok:
                 await callback.answer("Holat mos emas", show_alert=True)
@@ -812,50 +860,45 @@ async def cb_fix_bad(callback: CallbackQuery, bot: Bot) -> None:
                 await callback.answer("Xato ma'lumoti topilmadi", show_alert=True)
                 return
             await session.refresh(insp)
-            text = svc.returned_text(insp, err) + "\n\n👇 Qayta tuzatib tugmani bosing:"
+            fix_text = svc.returned_text(insp, err) + "\n\n👇 Qayta tuzatib tugmani bosing:"
+            closed = (
+                f"❌ <b>Tasdiqlanmadi</b> · #{insp.id}\n"
+                f"📄 Faktura: <b>{insp.invoice_number}</b>\n"
+                f"<i>Teruvchi qayta tuzatadi</i>"
+            )
 
             if ntf.uses_group_workflow(st):
-                await ntf.edit_photo_caption(
+                await _apply_group_edits(
                     bot,
-                    chat_id=callback.message.chat.id,
-                    message_id=callback.message.message_id,
-                    caption=text + "\n\n<i>Teruvchiga qaytarildi</i>",
-                    reply_markup=None,
+                    [
+                        (
+                            _msg_key(callback.message.chat.id, callback.message.message_id),
+                            closed,
+                            None,
+                        ),
+                        (
+                            _msg_key(insp.return_chat_id, insp.return_group_message_id),
+                            fix_text,
+                            picker_fix_kb(insp.id),
+                        ),
+                        (
+                            _msg_key(insp.picker_return_chat_id, insp.picker_return_message_id),
+                            fix_text,
+                            picker_fix_kb(insp.id),
+                        ),
+                        (
+                            _msg_key(insp.review_chat_id, insp.review_group_message_id),
+                            svc.group_error_sent_text(insp),
+                            None,
+                        ),
+                    ],
                 )
-                if insp.return_chat_id and insp.return_group_message_id:
-                    if (
-                        int(insp.return_chat_id) != callback.message.chat.id
-                        or int(insp.return_group_message_id) != callback.message.message_id
-                    ):
-                        await ntf.edit_photo_caption(
-                            bot,
-                            chat_id=int(insp.return_chat_id),
-                            message_id=int(insp.return_group_message_id),
-                            caption=text,
-                            reply_markup=picker_fix_kb(insp.id),
-                        )
-                if insp.picker_return_chat_id and insp.picker_return_message_id:
-                    await ntf.edit_photo_caption(
-                        bot,
-                        chat_id=int(insp.picker_return_chat_id),
-                        message_id=int(insp.picker_return_message_id),
-                        caption=text,
-                        reply_markup=picker_fix_kb(insp.id),
-                    )
-                if insp.review_chat_id and insp.review_group_message_id:
-                    await ntf.edit_photo_caption(
-                        bot,
-                        chat_id=int(insp.review_chat_id),
-                        message_id=int(insp.review_group_message_id),
-                        caption=svc.group_error_sent_text(insp),
-                        reply_markup=None,
-                    )
             else:
                 await ntf.edit_photo_caption(
                     bot,
                     chat_id=callback.message.chat.id,
                     message_id=callback.message.message_id,
-                    caption=text,
+                    caption=fix_text,
                     reply_markup=picker_fix_kb(insp.id),
                 )
                 picker_tg = await svc.picker_telegram_id(session, insp)
@@ -866,6 +909,8 @@ async def cb_fix_bad(callback: CallbackQuery, bot: Bot) -> None:
                         f"❌ Yana xato bor.\n📄 Faktura: {insp.invoice_number}\n"
                         "Qayta tuzating va tugmani bosing.",
                     )
+            insp.confirm_message_id = None
+            insp.confirm_chat_id = None
             await session.commit()
         await callback.answer("Teruvchi qayta tuzatadi")
     except Exception:
